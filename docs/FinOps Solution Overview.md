@@ -21,9 +21,9 @@ Requirements that span every phase. Phase-specific requirements (query latency, 
 
 ### Cross-Cutting Functional Requirements (inferred)
 
-- FR1: Every phase reads from Data Foundations' governed lakehouse as the single source of truth; no phase maintains its own parallel copy of conformed cost/usage data.
+- FR1: Every phase reads from Data Foundations' governed Snowflake platform as the single source of truth; no phase maintains its own parallel copy of conformed cost/usage data.
 - FR2: Every automated or AI-generated output (a recommendation, an anomaly flag, a chat answer, an automated action) must be traceable to the specific data it was derived from.
-- FR3: Vertical/account data segregation is enforced consistently across every consumer-facing surface (API, chat, dashboards, the Phase 5 workbench), not independently reimplemented per surface.
+- FR3: Vertical/account data segregation is enforced consistently across every consumer-facing surface (API, dashboards, Phase 5's Cloud Workbench chat), not independently reimplemented per surface.
 
 ### Cross-Cutting Non-Functional Requirements (inferred)
 
@@ -61,21 +61,21 @@ flowchart TD
     LEGACY -.->|replaced by| P1
 
     subgraph P1["Phase 1 — Data Platform Foundation"]
-        SRC --> LAKE["Governed lakehouse<br/>bronze to silver mediation to gold"]
+        SRC --> LAKE["Governed Snowflake platform<br/>bronze to silver mediation to gold"]
         LAKE --> SEM["Semantic layer +<br/>knowledge graph"]
     end
 
-    LAKE -.->|optional, ADR-003| SNOW["Snowflake<br/>BI serving path"]
-    SNOW --> PBI["Power BI<br/>existing"]
+    SEM -->|governed metrics| PBI["Power BI<br/>existing"]
+    LAKE -.->|ad hoc SQL, not yet in semantic layer| PBI
 
     subgraph P2["Phase 2 — Core Intelligence & Self-Serve Foundations"]
         SEM --> MLOPS["Core Intelligence: anomaly detection,<br/>rightsizing, RI/SP modeling"]
-        SEM --> CW["Cloud Workbench:<br/>chatbot + published APIs"]
+        SEM --> API["Self-Serve API +<br/>dashboards (non-agentic)"]
     end
 
     subgraph P3["Phase 3 — Governed Automation"]
         MLOPS --> ACT["Risk tiering + contract"]
-        CW --> ACT
+        API --> ACT
     end
 
     subgraph EXIST["Existing the organization Platforms — integrated with, not built here"]
@@ -91,9 +91,10 @@ flowchart TD
         SEM --> BILL["Bill verification:<br/>exception-based review"]
     end
 
-    subgraph P5["Phase 5 — Cloud Workbench Expansion"]
-        ACT --> CWEXP["Push + pull channels,<br/>what-if analysis"]
-        CW --> CWEXP
+    subgraph P5["Phase 5 — Cloud Workbench"]
+        SEM --> CW["Cloud Workbench:<br/>agentic chat, Internal + External"]
+        ACT --> CW
+        CW --> CWEXP["Push + pull channels,<br/>what-if analysis — planned extension"]
     end
 
     CWEXP <-->|push signals, pull aggregated views| IDP
@@ -101,7 +102,7 @@ flowchart TD
     CWEXP <-->|push signals, pull aggregated views| CASST
 ```
 
-**A naming note**: "Cloud Workbench" is the name used throughout this document set for the self-serve product designed here (chat, API, and — in Phase 5 — push/pull channels and what-if analysis). It is a deliberately different name from the organization's real, existing "Internal Assistant" tool shown above — see the naming note at the top of the Self-Serve Foundations doc for why. The "Internal Assistant" box in the diagram is that real, existing tool, not Cloud Workbench.
+**A naming note**: "Cloud Workbench" is the name used throughout this document set for the agentic, conversational self-serve product designed in Phase 5 (chat, and — planned — push/pull channels and what-if analysis). It is a deliberately different name from the organization's real, existing "Internal Assistant" tool shown above — see the naming note at the top of `Solution_Architecture_Cloud_Workbench.md` for why. The "Internal Assistant" box in the diagram is that real, existing tool, not Cloud Workbench. Phase 2's non-agentic self-serve (REST API, dashboards) is a separate capability, `Solution_Architecture_Self_Serve_Foundations.md`, and isn't called Cloud Workbench.
 
 | Box | Purpose | Detailed In |
 |---|---|---|
@@ -109,15 +110,16 @@ flowchart TD
 | APM Tool | the organization's existing Application Portfolio Management system — the source of the APM ID used as a cross-cloud resource identity key throughout the platform | Data Foundations §4.1 |
 | Source Systems | The aggregation point where the four sources above land before conformance begins — raw AWS/Azure/GCP billing and usage exports, plus APM tool metadata, pulled in as-received and preserved for audit/replay | Data Foundations §4.1 |
 | SQL Server (on-prem), PowerShell / stored procs | the organization's real, existing legacy pipeline — today's manual/scripted ingestion, reconciliation, and reporting logic. Phase 1 replaces this outright rather than integrating with it; nothing here is pulled forward except the domain knowledge encoded in the existing sprocs | Data Foundations, Executive Summary; `FinOps Current State.md` |
-| Snowflake, Power BI | An optional read-only BI serving path over gold, and the organization's existing BI tool. Snowflake is new infrastructure this platform introduces (not an existing the organization system); Power BI is existing and could repoint at this path instead of the current on-prem SQL Server | Data Foundations §4.3, ADR-003 |
-| Governed lakehouse | A Medallion-architected (bronze/silver/gold) lakehouse with ACID guarantees and time travel. Bronze holds raw, provider-native data; **mediation is the bronze-to-silver transform** — conforming provider-native billing data (different field names, tag semantics, refresh cadences per cloud) into one canonical schema, ingesting FOCUS-formatted exports where available, then layering organization-specific tag/attribution logic and deduplication on top — not a separate system ahead of the lakehouse; gold serves both existing BI reporting (optionally via a read-only Snowflake serving path, ADR-003) and ML/AI consumption from one trusted layer | Data Foundations §4.2–4.3, ADR-003; Build Specification §2–3 |
-| Semantic layer + knowledge graph | Defines business metrics once (e.g., EC2 spend, burn rate) and models entities/relationships — accounts, resources, tags, the APM ID — as a queryable graph, so every consumer reasons about cost data the same way | Data Foundations §4.4; Build Specification §4 |
-| Core Intelligence | Trains, versions, and serves the anomaly-detection, rightsizing, and RI/savings-plan models that read from the gold lakehouse layer and write findings back as graph facts | MLOps Pipeline document (entire) |
-| Cloud Workbench (chatbot + APIs) | Natural-language and programmatic self-serve interface, retrieving from the semantic layer, knowledge graph, and lakehouse to generate grounded, cited answers | Self-Serve Foundations §4.1–4.2; Build Specification §5, §7 |
+| Power BI | the organization's existing BI tool. Connects natively to the Snowflake platform's Semantic Views for governed metrics, falling back to gold-schema tables directly only for ad hoc queries not yet modeled as a metric (Data Foundations ADR-002, ADR-003) — no separate BI-serving system, no export step | Data Foundations §4.3, ADR-002, ADR-003 |
+| Governed Snowflake platform | A medallion-layered (bronze/silver/gold) structure implemented as Snowflake schemas, with native ACID guarantees and Time Travel — not a separate lakehouse product. Bronze holds raw, provider-native data; **mediation is the bronze-to-silver transform** — conforming provider-native billing data (different field names, tag semantics, refresh cadences per cloud) into one canonical schema, ingesting FOCUS-formatted exports where available, then layering organization-specific tag/attribution logic and deduplication on top — not a separate system ahead of the platform; gold serves both existing BI reporting and ML/AI consumption from one trusted layer, all on the same platform (Data Foundations ADR-003) | Data Foundations §4.2–4.3, ADR-003; Build Specification §2–3 |
+| Semantic layer + knowledge graph | Defines business metrics once (e.g., EC2 spend, burn rate) via Snowflake Semantic Views, and models entities/relationships — accounts, resources, tags, the APM ID — as a graph in **Neo4j**, a dedicated graph database synced from Snowflake's gold schema (Data Foundations ADR-004), so every consumer reasons about cost data the same way | Data Foundations §4.4; Build Specification §4 |
+| Core Intelligence | Trains, versions, and serves the anomaly-detection, rightsizing, and RI/savings-plan models (via Snowpark ML) that read from the gold-layer tables and write findings back as facts | MLOps Pipeline document (entire) |
+| Self-Serve API + dashboards | Non-agentic, programmatic self-serve: a governed REST API for other internal teams/tools, plus native Power BI dashboards — no chat interface at this phase | Self-Serve Foundations (entire); Build Specification §7 |
+| Cloud Workbench (chatbot) | Natural-language, agentic self-serve interface — Phase 5, after Core Intelligence, the API/dashboards layer, and Governed Automation are established — retrieving from the semantic layer, the Neo4j knowledge graph, gold-layer tables (via Snowflake Cortex Analyst), and a Postgres/pgvector documentation index (Cloud Workbench ADR-006) to generate grounded, cited answers | Cloud Workbench §4.1; Build Specification §5 |
 | Governed Automation (risk tiering + contract) | Classifies a proposed optimization action into LOW/MEDIUM/HIGH risk and routes it to automatic execution, delayed execution with opt-out, or mandatory human approval — enforced in code via policy-as-code, not the proposing system's own judgment | Governed Automation §3; Build Specification §6 |
 | IDP, CMP | the organization's existing infrastructure-provisioning and container-management platforms — Governed Automation calls these to actually execute an approved action; they aren't being replaced or rebuilt | Governed Automation §3; Build Specification §6 |
 | Bill verification | Reconciles invoiced line items against contracted rates and expected usage, producing a confidence score that routes high-confidence/low-impact items to auto-clear and everything else to a human reviewer | MLOps Pipeline §1.1 — problem statement only, no dedicated design yet |
-| Cloud Workbench Expansion | Adds push (signals embedded in IDP/CMP/the real Internal Assistant) and pull (a vertical-facing what-if/scenario surface aggregating those same tools plus cost/APM/reference data) to the Phase 2 chat/API product, submitting what-if results into Governed Automation | Planned — no sub-document yet |
+| Cloud Workbench Expansion | Adds push (signals embedded in IDP/CMP/the real Internal Assistant) and pull (a vertical-facing what-if/scenario surface aggregating those same tools plus cost/APM/reference data) to Phase 5's Cloud Workbench, submitting what-if results into Governed Automation | Planned — no sub-document yet |
 | Internal Assistant | the organization's real, existing chat/tooling product referenced in the job description — distinct from Cloud Workbench (see naming note above). Cloud Workbench Expansion's push channel surfaces signals into it; the pull channel aggregates from it. Its API readiness is the least certain of the three existing platforms — see the Solution Overview's Sub-Document Index | Not designed here — real, existing system |
 
 ---
@@ -130,15 +132,15 @@ Every item from the Opportunities document, traced to the solution component tha
 
 | Opportunity | Solution Component | Where It's Detailed | Status |
 |---|---|---|---|
-| FOCUS-aware native billing ingestion | Mediation (bronze-to-silver transform, within the lakehouse) | Data Foundations §4.2, ADR-001 | Detailed |
+| FOCUS-aware native billing ingestion | Mediation (bronze-to-silver transform, within Snowflake) | Data Foundations §4.2, ADR-001 | Detailed |
 | Managed orchestration | Ingestion DAGs | Build Specification §1 | Detailed |
-| Lakehouse (Iceberg/Delta) | Governed lakehouse (bronze/silver/gold) | Data Foundations §4.3 | Detailed |
+| Governed data platform | Governed Snowflake platform (bronze/silver/gold schemas) | Data Foundations §4.3, ADR-003 | Detailed |
 | Canonical data model / governed API | API/service layer | Self-Serve Foundations §4.2; Build Specification §7 | Detailed |
-| Governed semantic layer | Semantic layer | Data Foundations §4.4, ADR-002; Build Specification §4 | Detailed |
-| Knowledge graph / entity model | Ontology + graph store | Data Foundations §4.4; Build Specification §4 | Detailed |
+| Governed semantic layer | Semantic layer (Snowflake Semantic Views) | Data Foundations §4.4, ADR-002; Build Specification §4 | Detailed |
+| Knowledge graph / entity model | Ontology, implemented in Neo4j, synced from Snowflake's gold schema | Data Foundations §4.4, ADR-004; Build Specification §4 | Detailed |
 | MLOps foundation + explainability | Core Intelligence pipeline | MLOps Pipeline document (entire) | Detailed |
-| GenAI/RAG interface | AI consumption layer (Cloud Workbench) | Self-Serve Foundations §4.1; Build Specification §5 | Detailed |
-| AI evaluation/quality gate | Eval gate | Self-Serve Foundations §4.3; Build Specification §9 | Detailed |
+| GenAI/RAG interface | AI consumption layer (Cloud Workbench) | Cloud Workbench §4.1; Build Specification §5 | Detailed — Phase 5, not Phase 2 (see ADR-M1) |
+| AI evaluation/quality gate | Eval gate | Cloud Workbench §4.2; Build Specification §9 | Detailed — Phase 5 |
 | Formal data quality framework | DQ checks | Build Specification §2 | Detailed |
 | Governance/catalog tooling | Lineage/RBAC | Data Foundations §4.3, §4.5 | Detailed |
 
@@ -149,20 +151,21 @@ Every item from the Opportunities document, traced to the solution component tha
 | Near-real-time cost visibility | Data freshness NFR | Data Foundations §2.3 | Detailed (bounded by provider billing lag) |
 | Unit economics | — | — | **Planned** — extend semantic layer with unit-cost metric definitions |
 | ML-assisted analysis (anomaly, rightsizing, RI/SP) | Core Intelligence pipeline | MLOps Pipeline document | Detailed |
-| Commitment coverage/utilization tracking | `metric_ri_coverage` | MLOps Pipeline §2.2; Build Specification §4 | Detailed |
+| Commitment coverage/utilization tracking | `metric_ri_coverage` | MLOps Pipeline §2.3; Build Specification §4 | Detailed |
 | APM resolution rate as governance KPI | `dq_check_apm_id_present` | Build Specification §4 | Detailed |
-| Platform's own cost tracked | Cost-of-platform NFR | Self-Serve Foundations §2.3 | Detailed |
+| Platform's own cost tracked | Cost-of-platform NFR | Cloud Workbench §2.3 (token/infra cost); Cross-Cutting NFR table above (platform-wide) | Detailed |
 
 ### Part 2b — Self-Serve Channels & Personas
 
 | Opportunity | Solution Component | Where It's Detailed | Status |
 |---|---|---|---|
-| Standard reports/dashboards | API/service layer (thin view), or the Snowflake BI serving path | Self-Serve Foundations §4.2; Data Foundations ADR-003 | **Treated as a thin view for now** — review existing Power BI reports for reuse. Two candidate mechanisms, not yet chosen between: the API/service layer (net-new integration work per report), or repointing existing Power BI reports at the Snowflake read-only path over gold (Data Foundations ADR-003, potentially less rework if reports are largely SQL-shaped already). A dedicated sub-document may be needed depending on what that review finds |
-| Conversational interface (chatbot) | AI consumption layer (Cloud Workbench) | Self-Serve Foundations §4.1 | Detailed |
-| Published REST APIs | API/service layer | Self-Serve Foundations §4.2 | Detailed |
-| Push: FinOps signals embedded in IDP/CMP/Internal Assistant | Cloud Workbench Expansion | — | **Planned** — extension of Governed Automation plus a new embedding spec. "Internal Assistant" here is the real, existing the organization tool, distinct from Cloud Workbench |
-| Pull: vertical self-serve workbench + what-if analysis | Cloud Workbench Expansion | — | **Planned** — new sub-document needed |
-| Persona-scoped access + anonymized cross-vertical benchmarking | Cloud Workbench Expansion | — | **Planned** — extend semantic layer with peer-benchmark metrics and vertical-scoped RBAC |
+| Standard reports/dashboards | API/service layer (thin view), or Power BI connected to Snowflake Semantic Views | Self-Serve Foundations §4.2; Data Foundations ADR-002, ADR-003 | **Treated as a thin view for now** — review existing Power BI reports for reuse. Repointing them at Semantic Views (or gold directly, as a fallback for metrics not yet modeled) is native (Data Foundations ADR-002, ADR-003, no separate serving path to build), likely less rework than a net-new API/service-layer integration per report if the existing reports are largely SQL-shaped already, but this is unconfirmed. That review must also audit each report's own DAX measures for logic duplicating a Semantic View metric (Data Foundations §4.3) — repointing the query source doesn't by itself remove a local, independently-computed version of the same metric. A dedicated sub-document may be needed depending on what that review finds |
+| Conversational interface (chatbot) | AI consumption layer (Cloud Workbench) | Cloud Workbench §4.1 | Detailed — Phase 5, not Phase 2 (see ADR-M1) |
+| Published REST APIs | API/service layer | Self-Serve Foundations §4.1 | Detailed — Phase 2, non-agentic |
+| Persona-scoped access (Internal vs. External tool sets and data exposure) | Cloud Workbench persona resolution | Cloud Workbench §4.1, ADR-007 | Detailed |
+| Anonymized cross-vertical benchmarking, exposed to verticals | Cloud Workbench Expansion | — | **Planned** — the underlying rate-based metric (`metric_peer_percentile_rank`, Data Foundations §4.4) exists and is queryable by the Internal persona today (Cloud Workbench `get_peer_benchmark`), but not yet exposed to External/vertical sessions — a deliberate scope boundary (Cloud Workbench §2.4), not a missing metric |
+| Push: FinOps signals embedded in IDP/CMP/Internal Assistant | Cloud Workbench Expansion | — | **Planned** — extension of Governed Automation plus a new embedding spec, building on top of Phase 5's now-designed Cloud Workbench base. "Internal Assistant" here is the real, existing the organization tool, distinct from Cloud Workbench |
+| Pull: vertical self-serve workbench + what-if analysis | Cloud Workbench Expansion | — | **Planned** — new sub-document needed, extending Cloud Workbench (Phase 5) |
 
 ### Part 2c — Automated Optimization Actions
 
@@ -186,11 +189,11 @@ Every item from the Opportunities document, traced to the solution component tha
 
 | Phase | Scope | Rationale for Sequencing |
 |---|---|---|
-| **1 — Data Platform Foundation** | Mediation, lakehouse, semantic layer, knowledge graph, governance/catalog, data quality | Every later phase reads from this layer; building it first avoids every downstream consumer inventing its own conformance logic |
-| **2 — Core Intelligence & Self-Serve Foundations** | MLOps (anomaly/rightsizing/RI-SP), Cloud Workbench chatbot + APIs, AI eval gate | The first user-facing value, and the source of the recommendations Phase 3 automates |
-| **3 — Governed Automation** | Risk-tiered action layer, extended with the horizontal/vertical contract and remaining guardrails | Depends on Phase 2's recommendations existing before there's anything to automate |
+| **1 — Data Platform Foundation** | Mediation, Snowflake platform, semantic layer, knowledge graph, governance/catalog, data quality | Every later phase reads from this layer; building it first avoids every downstream consumer inventing its own conformance logic |
+| **2 — Core Intelligence & Self-Serve Foundations** | MLOps (anomaly/rightsizing/RI-SP), a non-agentic REST API + dashboards | The first user-facing value, and the source of the recommendations Phase 3 automates — deliberately simple, deterministic surfaces first |
+| **3 — Governed Automation** | Risk-tiered action layer, extended with the horizontal/vertical contract and remaining guardrails | Depends on Phase 2's recommendations existing before there's anything to automate; also needs to be proven and mature before Phase 5 adds a second, agent-driven proposal source on top of it |
 | **4 — Financial Process Automation** | Bill verification as exception-based review | Independent of Phases 2–3's infrastructure-action focus; sequenced after the core platform is stable since it's a different domain (financial reconciliation, not infrastructure) sharing the same confidence-scored-routing pattern |
-| **5 — Cloud Workbench Expansion** | Push (embedded signals) and pull (what-if analysis, benchmarking) channels added to the Phase 2 Cloud Workbench product | Deliberately last: the what-if capability depends on Phase 1's data foundation and Phase 3's contract/automation framework to turn a simulation into a governed action, so building it earlier would mean building against a moving target |
+| **5 — Cloud Workbench** | The agentic, conversational self-serve interface (chatbot), plus its planned push/pull/what-if expansion | Deliberately last, not alongside Phase 2: prove the data foundation, ML pipeline, and Governed Automation through simpler surfaces first, before investing in the more complex agentic layer — see ADR-M1 |
 
 ---
 
@@ -200,31 +203,32 @@ Every item from the Opportunities document, traced to the solution component tha
 
 | Document | Phase | Location | Covers |
 |---|---|---|---|
-| Solution Architecture: Data Foundations | 1 | [Solution_Architecture_Data_Foundations.md](Solution_Architecture_Data_Foundations.md) | Source systems, mediation, governed lakehouse, semantic layer + knowledge graph |
+| Solution Architecture: Data Foundations | 1 | [Solution_Architecture_Data_Foundations.md](Solution_Architecture_Data_Foundations.md) | Source systems, mediation, governed Snowflake platform, semantic layer + knowledge graph |
 | Solution Architecture: Cost Anomaly Detection, Rightsizing & RI/SP Modeling — MLOps Pipeline (Core Intelligence) | 2 | [Solution_Architecture_MLOps_Pipeline.md](Solution_Architecture_MLOps_Pipeline.md) | 2a's ML-assisted analysis in full; also carries bill verification's (2d) problem statement only, scoped explicitly as not-yet-designed there |
-| Solution Architecture: Self-Serve Foundations — Cloud Workbench | 2 | [Solution_Architecture_Self_Serve_Foundations.md](Solution_Architecture_Self_Serve_Foundations.md) | Self-serve chatbot/API channels (2b) |
+| Solution Architecture: Self-Serve Foundations | 2 | [Solution_Architecture_Self_Serve_Foundations.md](Solution_Architecture_Self_Serve_Foundations.md) | Non-agentic self-serve: REST API + dashboards (2b, minus the chatbot) |
 | Solution Architecture: Governed Automation | 3 | [Solution_Architecture_Governed_Automation.md](Solution_Architecture_Governed_Automation.md) | The action layer's risk-tiered automation (2c) — the contract artifact itself flagged as not yet designed |
-| Detailed Build Specification: FinOps Intelligence Platform | 1–3 | [Platform_Build_Specification.md](Platform_Build_Specification.md) | Companion to the four docs above — table names, job names, function signatures, policy names at build-ready specificity |
+| Solution Architecture: Cloud Workbench | 5 | [Solution_Architecture_Cloud_Workbench.md](Solution_Architecture_Cloud_Workbench.md) | The agentic, conversational self-serve interface (2b's chatbot item) — deliberately sequenced as Phase 5, not Phase 2 (ADR-M1) |
+| Detailed Build Specification: FinOps Intelligence Platform | 1–3, 5 | [Platform_Build_Specification.md](Platform_Build_Specification.md) | Companion to the five docs above — table names, job names, function signatures, policy names at build-ready specificity |
 
-Data Foundations, Self-Serve Foundations, and Governed Automation were originally one combined "Internal Assistant" solution architecture document; it was split along phase boundaries once it became clear one document was standing in as the source for four different phases in the Capability Map below. See the naming note at the top of the Self-Serve Foundations doc for why "Cloud Workbench," not "Internal Assistant," names the self-serve product designed there.
+Data Foundations, Self-Serve Foundations, and Governed Automation were originally one combined "Internal Assistant" solution architecture document; it was split along phase boundaries once it became clear one document was standing in as the source for four different phases in the Capability Map below. Cloud Workbench (the agentic chat interface) was later split out of Self-Serve Foundations a second time and moved to Phase 5 — see ADR-M1 and the naming note at the top of `Solution_Architecture_Cloud_Workbench.md` for why "Cloud Workbench," not "Internal Assistant," names the self-serve product designed there.
 
 ### Planned (not yet written)
 
 | Document | Phase | Would Cover |
 |---|---|---|
 | Bill Verification as Exception-Based Review | 4 | Dedicated architectural treatment of 2d — schema, pipeline, confidence/routing logic, ADR — extending the MLOps pattern rather than inventing a new one |
-| Cloud Workbench Expansion: Push/Pull Channels & What-If Analysis | 5 | 2b's dashboard, push-embedding, pull-workbench, what-if analysis, and benchmarking items. **Assumption adopted**: IDP and CMP are treated as API-reachable (Governed Automation already calls them directly); the real Internal Assistant tool's API surface is not assumed — chat tools don't always expose a clean integration surface — and is the higher-risk item in this doc's eventual scope, worth validating before committing to the push channel's design |
+| Cloud Workbench Expansion: Push/Pull Channels & What-If Analysis | 5 (extension) | 2b's dashboard, push-embedding, pull-workbench, what-if analysis, and benchmarking items, extending the now-existing Cloud Workbench doc rather than a wholly separate document. **Assumption adopted**: IDP and CMP are treated as API-reachable (Governed Automation already calls them directly); the real Internal Assistant tool's API surface is not assumed — chat tools don't always expose a clean integration surface — and is the higher-risk item in this doc's eventual scope, worth validating before committing to the push channel's design |
 | Governed Automation: The Horizontal/Vertical Contract | 3 (extension) | 2c's contract artifact, consent schema, and the guardrails not yet modeled (dry-run, kill switch, hard caps, exception process) — extends the existing Governed Automation doc rather than a wholly separate document |
 
 ---
 
 ## Master-Level Architecture Decisions
 
-**ADR-M1: Sequence Cloud Workbench Expansion (Phase 5) after the core data/intelligence/automation foundation (Phases 1–3), not concurrently**
-- *Context*: The what-if capability needs a stable semantic layer, knowledge graph, and automation contract to bridge a simulation into a governed action.
-- *Decision*: Treat Phase 5 as dependent on Phases 1–3 being substantially complete.
-- *Alternatives considered*: Build the expansion in parallel with the foundation, rejected — it would either duplicate the data model being built underneath it or be re-architected once that foundation lands.
-- *Consequences*: Verticals wait longer for the pull-based what-if capability than for push-based signals, an acceptable tradeoff against building on unstable foundations.
+**ADR-M1: Sequence Cloud Workbench itself — not just its push/pull expansion — as Phase 5, after the core data/intelligence/automation foundation (Phases 1–3), not alongside Phase 2**
+- *Context*: An earlier version of this document set placed the agentic, conversational interface in Phase 2, alongside Core Intelligence, with only its push/pull/what-if *expansion* deferred to Phase 5. Direction received since then: keep the agent out of Phase 2 entirely, leaving Self-Serve Foundations to the ML-facing API and dashboards only. Two reasons this holds up on its own merits, not just as a directive: first, an LLM-driven agent is materially more complex and less predictable than a REST API or a BI dashboard — proving the data foundation and Core Intelligence's models are trustworthy through simple, deterministic surfaces first means any problem surfacing later is more likely to be the agent, not the data underneath it. Second, Cloud Workbench's own FR4 lets it propose actions through Governed Automation (Phase 3) — building that capability before Governed Automation exists, or while it's still new and unproven, means either building against a moving target or shipping an agent that can't yet do the one thing (safe automation) that makes it more than a chatbot wrapped around a dashboard.
+- *Decision*: Treat Phase 5 as covering Cloud Workbench's full base capability (not just an expansion of an existing Phase 2 chatbot) plus its planned push/pull/what-if extension, both dependent on Phases 1–3 being substantially complete. Self-Serve Foundations (Phase 2) covers only the non-agentic REST API and dashboards.
+- *Alternatives considered*: Ship the base chatbot in Phase 2 as originally scoped, deferring only push/pull/what-if to Phase 5 — rejected per the reasoning above, not merely reverted on request. Build the full Cloud Workbench product (base plus expansion) in parallel with the Phase 1–3 foundation — rejected, same reasoning as the original ADR: it would either duplicate the data model being built underneath it or be re-architected once that foundation lands, and now additionally risks building action-proposal capability against a Governed Automation that doesn't exist yet.
+- *Consequences*: Verticals get programmatic/dashboard self-serve at Phase 2 but wait until Phase 5 for a conversational interface — a real UX gap for that period, accepted because the deflect-the-FinOps-inbox use case (Cloud Workbench §2.1) is valuable but not the platform's first, highest-leverage investment; the data foundation and ML pipeline are. This also means Governed Automation (Phase 3) is built and proven against a single proposal source (Core Intelligence) before a second, user-driven one is added — a smaller, more testable surface at the point it matters most.
 
 **ADR-M2: Align the Opportunities document's risk tiering directly to the Build Specification's three-value `RiskTier` enum (LOW/MEDIUM/HIGH), rather than maintaining two vocabularies**
 - *Context*: The Opportunities document originally described a four-tier model (Tiers 0–3); the Build Specification's `classify_action_risk` already defines a three-value enum. Maintaining both meant reconciling them every time the two documents were read together.
@@ -259,6 +263,6 @@ Data Foundations, Self-Serve Foundations, and Governed Automation were originall
 
 **Phase** — A sequenced grouping of solution components in this document, ordered by technical dependency, not a committed delivery timeline.
 
-**Cloud Workbench** — The self-serve product this document set designs: chat and published APIs in Phase 2, expanded in Phase 5 with push (signals embedded in tools verticals already use) and pull (a vertical-facing what-if surface for scenario planning) channels. Deliberately not named "Internal Assistant," which refers to the organization's real, existing tool — see the naming note under Solution Overview above.
+**Cloud Workbench** — The agentic, conversational self-serve product this document set designs, scoped to Phase 5 (not Phase 2, see ADR-M1) — chat today, planned to expand with push (signals embedded in tools verticals already use) and pull (a vertical-facing what-if surface for scenario planning) channels. Distinct from Self-Serve Foundations' Phase 2 REST API and dashboards, which are non-agentic and exist earlier. Deliberately not named "Internal Assistant," which refers to the organization's real, existing tool — see the naming note under Solution Overview above.
 
 **Contract (automation consent)** — The per-application, per-vertical record of what automated actions are pre-approved, keyed on the APM ID, that the action layer consults before acting on anything beyond the advisory-only default.

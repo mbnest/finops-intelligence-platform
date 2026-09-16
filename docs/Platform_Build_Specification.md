@@ -1,6 +1,6 @@
 # Detailed Build Specification: FinOps Intelligence Platform
 
-Companion to three solution architecture documents, each covering a phase from `FinOps Solution Overview.md`: `Solution_Architecture_Data_Foundations.md` (§1–4 below), `Solution_Architecture_Self_Serve_Foundations.md` — Cloud Workbench (§5, §7), and `Solution_Architecture_Governed_Automation.md` (§6). §8–9 are cross-cutting infrastructure and observability shared across all three. Those documents establish the architecture and decisions; this one goes one level deeper, naming the actual components, schemas, interfaces, and policy artifacts precisely enough that a single IC could take this and build the full stack without having to invent structure themselves. **No implementation code is included by design**, this specifies what must exist and its contract, not how it's written. Names below are illustrative and consistent, not confirmed the organization naming conventions, adapt to actual org standards if this were real.
+Companion to four solution architecture documents, each covering a phase from `FinOps Solution Overview.md`: `Solution_Architecture_Data_Foundations.md` (§1–4 below), `Solution_Architecture_Self_Serve_Foundations.md` — Phase 2's API/dashboards (§7), `Solution_Architecture_Governed_Automation.md` (§6), and `Solution_Architecture_Cloud_Workbench.md` — Phase 5's agentic interface (§5). §8–9 are cross-cutting infrastructure and observability shared across all four. Those documents establish the architecture and decisions; this one goes one level deeper, naming the actual components, schemas, interfaces, and policy artifacts precisely enough that a single IC could take this and build the full stack without having to invent structure themselves. **No implementation code is included by design**, this specifies what must exist and its contract, not how it's written. Names below are illustrative and consistent, not confirmed the organization naming conventions, adapt to actual org standards if this were real.
 
 ---
 
@@ -20,19 +20,19 @@ Companion to three solution architecture documents, each covering a phase from `
 
 ---
 
-## 2. Bronze & Silver: Ingestion and Mediation (Databricks, Delta Lake)
+## 2. Bronze & Silver: Ingestion and Mediation (Snowflake)
 
-Mediation is implemented here, as the bronze-to-silver transform within the lakehouse — not as a separate staging system. Bronze and silver live in the same `finops_platform` catalog as gold (Section 3); this section covers the jobs that populate both.
+Mediation is implemented here, as the bronze-to-silver transform within Snowflake — not as a separate staging system. Bronze and silver live in the same `finops_platform` Snowflake database as gold (Section 3), as separate schemas; this section covers the jobs that populate both.
 
-**Databricks Workflows / Spark jobs**:
+**Orchestration**: the Airflow DAGs from Section 1 (or native Snowflake Tasks) trigger this stage's dbt models and Snowpark procedures in sequence — no separate workflow engine for in-warehouse steps.
 
 | Job | Name | Input | Output | Purpose |
 |---|---|---|---|---|
-| Bronze ingest | `job_bronze_ingest_cost` | Raw landing zone (`raw/{provider}/...`) | `bronze.cost_line_items_raw` | Loads provider-native line items as-received into Delta, one-to-one with the landing zone — no transformation, still per-provider field names |
-| Normalize | `spark_job_normalize_billing` | `bronze.cost_line_items_raw` | `silver.stg_{provider}_billing` | Field renaming, currency/unit conformance per provider (a lighter step where a FOCUS-compliant export is used — see the Data Foundations doc §4.2) |
-| Reconcile tags | `spark_job_reconcile_tags` | Staged per-provider silver tables | `silver.stg_tags_reconciled` | Maps provider-specific tag keys to canonical tag taxonomy |
-| Deduplicate + business rules | `spark_job_dedupe_line_items` (a.k.a. `job_silver_transform_cost`) | Reconciled staged data | `silver.cost_line_items_clean` | Removes duplicate line items from overlapping export windows, applies business rules — this is the lakehouse's silver transform |
-| Data quality | `spark_job_dq_checks` | `silver.cost_line_items_clean` | DQ result log + quarantine table | Runs validation rules before promotion to gold (Section 3) |
+| Bronze ingest | `job_bronze_ingest_cost` | Raw landing zone (`raw/{provider}/...`) | `bronze.cost_line_items_raw` | Loads provider-native line items as-received into Snowflake, one-to-one with the landing zone — no transformation, still per-provider field names |
+| Normalize | `dbt_model_normalize_billing` | `bronze.cost_line_items_raw` | `silver.stg_{provider}_billing` | Field renaming, currency/unit conformance per provider (a lighter step where a FOCUS-compliant export is used — see the Data Foundations doc §4.2) |
+| Reconcile tags | `dbt_model_reconcile_tags` | Staged per-provider silver tables | `silver.stg_tags_reconciled` | Maps provider-specific tag keys to canonical tag taxonomy |
+| Deduplicate + business rules | `snowpark_job_dedupe_line_items` (a.k.a. `job_silver_transform_cost`) | Reconciled staged data | `silver.cost_line_items_clean` | Removes duplicate line items from overlapping export windows, applies business rules — this is the platform's silver transform; done in Snowpark rather than dbt/SQL because the dedup logic is more naturally a stateful pass than a set-based query |
+| Data quality | `job_dq_checks` (a dbt test suite) | `silver.cost_line_items_clean` | DQ result log + quarantine table | Runs validation rules before promotion to gold (Section 3) |
 
 **Silver staging schema (illustrative)**:
 
@@ -44,7 +44,7 @@ Mediation is implemented here, as the bronze-to-silver transform within the lake
 | `silver.cost_line_items_clean` | `line_item_id` (PK), `resource_id`, `account_id`, `vertical_id`, `cost_usd`, `usage_date`, `canonical_tags` (variant/JSON) | Canonical, cross-provider, deduplicated schema; feeds gold aggregation (Section 3) |
 | `silver.dq_results` | `run_id`, `check_name`, `status`, `failed_row_count`, `run_timestamp` | Data quality audit trail |
 
-**Data quality checks (named rules, applied by `spark_job_dq_checks`)**:
+**Data quality checks (named rules, applied by `job_dq_checks`)**:
 - `dq_check_null_resource_id` — fails if `resource_id` is null on a non-tax line item
 - `dq_check_currency_valid` — fails if `currency` isn't in the supported set
 - `dq_check_cost_non_negative` — flags (not fails) negative costs for manual review, credits are legitimate but rare
@@ -54,16 +54,16 @@ Mediation is implemented here, as the bronze-to-silver transform within the lake
 
 ---
 
-## 3. Governed Lakehouse: Gold Layer & Catalog (Databricks, Delta Lake, Medallion)
+## 3. Governed Snowflake Platform: Gold Layer & Catalog (medallion-layered schemas)
 
-**Catalog structure**: `finops_platform` (catalog) → `bronze` / `silver` / `gold` (schemas) — bronze and silver are populated by the jobs in Section 2; this section covers gold and the governance layer spanning all three.
+**Database structure**: `finops_platform` (Snowflake database) → `bronze` / `silver` / `gold` (schemas) — bronze and silver are populated by the jobs in Section 2; this section covers gold and the governance layer spanning all three.
 
-**Databricks Workflows jobs**:
+**Jobs (dbt models, orchestrated per Section 2)**:
 
 | Job | Name | Trigger | Purpose |
 |---|---|---|---|
-| Gold aggregate | `job_gold_aggregate_cost` | Downstream of `spark_job_dq_checks` (Section 2) | Build fact/dimension tables from `silver.cost_line_items_clean` → `gold.*` |
-| Lineage sync | `job_lineage_catalog_sync` | Post gold job | Registers lineage/tags in the governance catalog |
+| Gold aggregate | `job_gold_aggregate_cost` (a dbt model) | Downstream of `job_dq_checks` (Section 2) | Build fact/dimension tables from `silver.cost_line_items_clean` → `gold.*` |
+| Governance tagging | `job_governance_tag_sync` | Post gold job | Applies Snowflake object tags (Section 3's tagging below) to new/changed gold objects |
 
 **Gold-layer schema (consumption-ready)**:
 
@@ -77,32 +77,39 @@ Mediation is implemented here, as the bronze-to-silver transform within the lake
 | `gold.fact_anomaly` | Fact | `anomaly_id`, `resource_id`, `detected_date`, `severity`, `model_version`, `contributing_factors` (JSON) | Written by Core Intelligence (MLOps Pipeline doc) |
 | `gold.fact_recommendation` | Fact | `recommendation_id`, `resource_id`, `type`, `estimated_savings_usd`, `status`, `model_version` | Written by Core Intelligence |
 
-**Governance/RBAC (Unity Catalog-equivalent)**:
-- Row-level security policy `rls_policy_vertical_scope` on `gold.fact_cost_daily` and `gold.fact_anomaly`, filtering by `vertical_id` against the requesting user/service principal's assigned vertical(s)
+**Governance/RBAC (Snowflake Horizon)**:
+- Row access policy `rap_vertical_scope` on `gold.fact_cost_daily` and `gold.fact_anomaly`, filtering by `vertical_id` against the requesting user/service principal's assigned vertical(s)
 - Access roles: `role_vertical_{name}_reader` (read own vertical only), `role_platform_admin` (cross-vertical read), `role_ml_pipeline_svc` (write access to `fact_anomaly`/`fact_recommendation` only)
-- Column-level tagging: `cost_usd` and `estimated_savings_usd` tagged `sensitivity:financial` for downstream policy enforcement
+- Object tagging: `cost_usd` and `estimated_savings_usd` tagged `sensitivity:financial` via Snowflake tag-based classification, with a masking policy attached for any role without an explicit financial-data grant
 
-**Optional BI serving path (Data Foundations ADR-003)**:
-
-| Component | Name | Purpose |
-|---|---|---|
-| Share | `share_gold_bi_readonly` | A Delta Share (or Snowflake external-table/Iceberg-catalog equivalent) exposing `gold.*` read-only to Snowflake |
-| Snowflake database | `FINOPS_BI` | Read-only Snowflake database mounted against the share — no independent ETL, no copy, no independently-maintained schema |
-
-Row-level security and column-level tagging above apply identically on the Snowflake side of the share — this is the same governed data through a second query engine, not a second governance model.
+**BI access is a native grant, not a separate system.** Power BI connects with `role_vertical_{name}_reader` or `role_platform_admin` against the Semantic Views (Section 4) for anything with a governed metric definition; the same roles grant fallback access directly against `gold` schema views for ad hoc analyst SQL not yet expressible as a metric (Data Foundations ADR-002, ADR-003). No share object, no second database, no independently-maintained copy either way. The row access policy and tagging above apply to every consumer — Semantic Views included, since they're computed from these same `gold` tables — by construction, rather than as a second governance model to keep in sync.
 
 ---
 
 ## 4. Semantic Layer, Ontology, and Knowledge Graph
 
-**Semantic layer** (metric definitions, implemented as a metrics config, e.g. dbt semantic layer YAML or equivalent):
+**Semantic layer** (metric definitions, implemented as Snowflake Semantic Views, optionally authored via dbt's semantic layer config and published into Snowflake):
 
 | Metric name | Definition (source) | Notes |
 |---|---|---|
 | `metric_ec2_spend` | `SUM(cost_usd) WHERE resource_type = 'ec2' FROM gold.fact_cost_daily` | Canonical definition, single source of truth |
+| `metric_total_spend` | `SUM(cost_usd)` from `gold.fact_cost_daily`, by vertical/account/period | |
+| `metric_spend_variance_mom` | Period-over-period delta on `metric_total_spend`, decomposed into new/terminated resources vs. usage change vs. price change | |
+| `metric_spend_by_resource_type` | `SUM(cost_usd) GROUP BY resource_type` | |
+| `metric_spend_by_environment` | `SUM(cost_usd) GROUP BY environment` tag | |
+| `metric_unattributed_spend_pct` | `SUM(cost_usd)` where APM ID is unresolved, as % of total spend | Dollar-weighted; distinct from `dq_check_apm_id_present`'s resource-count-weighted version (Section 2) |
 | `metric_monthly_burn_rate` | `SUM(cost_usd) GROUP BY MONTH(date), account_id` | |
+| `metric_forecast_vs_budget_variance` | Projected month-end spend (run-rate extrapolation of `metric_monthly_burn_rate`) vs. budget reference data | Budget reference data source not yet defined — placeholder, per `FinOps Opportunities.md` |
+| `metric_utilization_rate` | Consumed vs. allocated compute/memory/storage, per resource | Reused as a feature input by MLOps Pipeline (rightsizing), not recomputed there — see MLOps Pipeline ADR-001 |
+| `metric_idle_resource_spend` | `SUM(cost_usd)` where `metric_utilization_rate` is below a configurable near-zero threshold | |
+| `metric_open_recommendation_savings` | `SUM(estimated_savings_usd)` from `gold.fact_recommendation` where `status = 'open'` | |
+| `metric_recommendation_realization_rate` | % of recommendations moved to an "implemented" status within N days of being raised | |
 | `metric_ri_coverage` | Derived from `fact_cost_daily` joined against RI commitment reference data | |
+| `metric_ri_sp_utilization` | Committed capacity actually consumed, vs. purchased | Reused as a feature input by MLOps Pipeline (RI/SP modeling), not recomputed there — see MLOps Pipeline ADR-001 |
 | `metric_anomaly_rate` | `COUNT(fact_anomaly) / COUNT(DISTINCT resource_id)` per period | |
+| `metric_anomaly_dollar_impact` | `SUM(cost_usd)` attributable to line items flagged by `fact_anomaly` | |
+| `metric_chargeback_amount` | `metric_total_spend` rolled up to vertical, one month in arrears | Matches Current State's existing chargeback cadence |
+| `metric_peer_percentile_rank` | Percentile rank of a rate metric (e.g. `metric_utilization_rate`) against an anonymized peer set | Rate-based only, per `FinOps Opportunities.md` §2b |
 
 **Ontology (entity/relationship definitions)**:
 
@@ -116,14 +123,14 @@ Row-level security and column-level tagging above apply identically on the Snowf
 | `Anomaly` | anomaly_id, severity | `DETECTED_ON → Resource` |
 | `Recommendation` | recommendation_id, type | `TARGETS → Resource` |
 
-**Graph store**: property graph database (e.g., a Gremlin- or Cypher-compatible store). Node labels and relationship types mirror the ontology table above directly.
+**Graph store**: Neo4j (Data Foundations ADR-004) — a dedicated property-graph database, not implemented in Snowflake. Node labels and relationship types mirror the ontology table above directly (`Resource`, `Account`, `Vertical`, `Tag`, `CostLineItem`, `Anomaly`, `Recommendation`).
 
 **Graph population pipeline**:
 
 | Job | Name | Trigger | Purpose |
 |---|---|---|---|
-| Graph sync | `job_populate_graph_from_gold` | Post gold-aggregate job | Upserts nodes/relationships from `gold.*` tables into the graph store |
-| Entity resolution | `job_entity_resolution` | Within graph sync | Runs `resolve_resource_identity()` logic to merge cross-provider duplicate resource records into one node |
+| Graph sync | `job_populate_graph_from_gold` | Post gold-aggregate job (Section 3) | Upserts nodes/relationships into Neo4j — gold remains the system of record, Neo4j is a resynced derivative. Static node attributes read from `gold.*` tables directly; any computed node property reads from the corresponding Snowflake Semantic View metric (Section 4's semantic layer) rather than being recalculated independently in this job (Data Foundations ADR-004) |
+| Entity resolution | `job_entity_resolution` (Snowpark) | Within `job_gold_aggregate_cost`, ahead of graph sync | Runs `resolve_resource_identity()` logic to merge cross-provider duplicate resource records into one row in `gold.dim_resource`, before that row is synced into Neo4j as a single node |
 
 **Function signature (specification, not implementation)**:
 ```
@@ -146,37 +153,62 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 | Table | `bronze.apm_application_metadata` | `apm_id` (PK), `app_name`, `classification`, `owner_current`, `technical_contact_current` |
 | SCD Type 2 table | `silver.apm_owner_history` | `apm_id`, `owner`, `technical_contact`, `effective_start_date`, `effective_end_date` (null = current) |
 
+**Terraform state ingestion** (Data Foundations §4.1):
+
+| Component | Name | Purpose |
+|---|---|---|
+| Ingestion job | `job_terraform_state_sync` | Pulls resolved resource config from the organization's Terraform state backend (Terraform Cloud/Enterprise API, or a state file backend), scheduled on module-apply events where available, otherwise daily |
+| Table | `gold.dim_resource_iac_state` | `resource_id` (PK/FK to `gold.dim_resource`), `managed_by_iac` (bool), `declared_config` (JSON), `last_apply_timestamp`, `config_drift` (bool, computed against the resource's current observed config) |
+
 **Additional data quality checks (named rules)**:
 - `dq_check_apm_id_present` — tracks the percentage of resources with a resolved APM ID (target: matching or exceeding the ~nearly all baseline); trended over time as a governance KPI, not just a pass/fail gate.
 - `dq_check_owner_staleness` — flags `silver.apm_owner_history` records where `effective_start_date` exceeds a configurable staleness threshold (e.g., 6-12 months) without reconfirmation, distinct from `dq_check_apm_id_present`, this checks the volatile attribute, not the structural resource-to-app mapping.
 
 ---
 
-## 5. AI Consumption Layer (Cloud Workbench)
+## 5. AI Consumption Layer (Cloud Workbench, Phase 5)
+
+**Vector store: Postgres + pgvector** (Cloud Workbench ADR-006), separate from both Snowflake and the Neo4j graph store.
+
+| Component | Name | Purpose |
+|---|---|---|
+| Table | `docs.semantic_doc_chunks` | `chunk_id` (PK), `source_ref`, `content`, `embedding` (`vector` type, pgvector), `content_tsv` (`tsvector`, generated column for full-text search) |
+| Index | `idx_semantic_doc_chunks_embedding` | Approximate-nearest-neighbor index (e.g., HNSW) on `embedding`, for the dense-retrieval leg |
+| Index | `idx_semantic_doc_chunks_tsv` | GIN index on `content_tsv`, for the sparse/keyword-retrieval leg |
+| Sync job | `job_sync_semantic_docs_to_pgvector` | Reads semantic layer documentation (Data Foundations §4.4, Snowflake Semantic Views), (re-)computes embeddings via Azure OpenAI `text-embedding-3-small`, and upserts into `docs.semantic_doc_chunks` on documentation change |
 
 **MCP server and exposed tools**:
 
 | Tool name | Signature (spec) | Purpose |
 |---|---|---|
-| `get_cost_by_account` | `(account_id: str, period: DateRange) -> CostSummary` | Structured query against `gold.fact_cost_daily` |
-| `get_anomalies` | `(vertical_id: str, period: DateRange, min_severity: str) -> List[Anomaly]` | Query `gold.fact_anomaly` |
-| `query_graph` | `(query: GraphQuery) -> GraphResult` | Executes a scoped graph traversal |
-| `search_semantic_docs` | `(query: str, top_k: int) -> List[Chunk]` | Hybrid dense (vector) + sparse (keyword/BM25) search over semantic layer documentation, returning both candidate sets for reranking (see `node_rerank`) |
+| `get_cost_by_account` | `(account_id: str, period: DateRange) -> CostSummary` | Structured query against `gold.fact_cost_daily`. **Internal persona only** — not in the External tool set (Cloud Workbench ADR-007) |
+| `get_anomalies` | `(vertical_id: str, period: DateRange, min_severity: str) -> List[Anomaly]` | Query `gold.fact_anomaly`, RBAC-scoped to the requestor's own vertical(s) regardless of persona |
+| `get_peer_benchmark` | `(metric_name: str, vertical_id: str) -> BenchmarkResult` | Returns `metric_peer_percentile_rank` (Data Foundations §4.4) for a rate-based metric only — the External persona's cross-vertical comparison tool, never raw peer figures |
+| `query_graph` | `(query: GraphQuery) -> GraphResult` | Executes a scoped Cypher graph traversal against Neo4j (Section 4) |
+| `search_semantic_docs` | `(query: str, top_k: int) -> List[Chunk]` | Hybrid dense (pgvector) + sparse (Postgres full-text) search over `docs.semantic_doc_chunks` (Cloud Workbench ADR-006), both candidate sets passed to `node_rerank` |
+
+**Persona-to-tool-set mapping** (enforced by `node_resolve_persona`, below; Cloud Workbench ADR-007):
+
+| Persona | Tools available |
+|---|---|
+| Internal (FinOps/platform team) | All tools in this section, unrestricted by persona (still RBAC-scoped by vertical/account where applicable) |
+| External (a business vertical) | `get_anomalies`, `get_peer_benchmark`, `query_graph`, `search_semantic_docs` — **not** `get_cost_by_account` (a raw multi-vertical query shape); cross-vertical comparison is only available via `get_peer_benchmark`'s rate-based metrics |
 
 **LangGraph nodes** (workflow steps, state machine):
 
 | Node | Name | Function |
 |---|---|---|
+| Resolve persona | `node_resolve_persona` | First node in the graph. Resolves Internal/External from auth context, binds the persona-scoped tool set (above) and system-prompt variant for the rest of the request (Cloud Workbench ADR-007) |
 | Query rewrite | `node_query_rewrite` | Resolves conversational references, disambiguates the raw query |
-| Route retrieval | `node_route_retrieval` | Decides structured/graph/vector path(s) based on query shape |
+| Route retrieval | `node_route_retrieval` | Decides structured/graph/vector path(s) based on query shape, from the tool set `node_resolve_persona` bound |
 | Retrieve structured | `node_retrieve_structured` | Calls `get_cost_by_account` / `get_anomalies` |
 | Retrieve graph | `node_retrieve_graph` | Calls `query_graph` for relational questions |
 | Retrieve vector | `node_retrieve_vector` | Calls `search_semantic_docs` for definitional questions |
-| Rerank | `node_rerank` | Cross-encoder rerank across the combined dense + sparse candidates from `search_semantic_docs` (see Self-Serve Foundations ADR-001) |
+| Rerank | `node_rerank` | Cross-encoder rerank across the combined dense + sparse candidates from `search_semantic_docs` (see Cloud Workbench ADR-001) |
 | Generate | `node_generate` | LLM call with assembled context |
 | Grounding check | `node_grounding_check` | Runs `check_faithfulness()` before allowing the response through |
 | Format citations | `node_format_citations` | Attaches human-readable source references |
-| Route to action | `node_route_action` (conditional edge) | If the query implies an action, routes to the action-layer nodes (Section 6) |
+| Route to action | `node_route_action` (conditional edge) | If the query implies an action, calls `propose_action` (Section 6) — the only action-layer tool exposed to this agent; it never calls `idp_provision_request`/`cmp_container_action` directly |
 
 **Function signatures (specification)**:
 ```
@@ -202,30 +234,62 @@ check_confidence_threshold(retrieval_scores: List[float]) -> bool
 
 ## 6. Action Layer (IDP, CMP Integration)
 
-**MCP action tools**:
+**Agent-facing tool — the single entry point (Governed Automation §3.2)**:
+
+| Tool name | Signature (spec) | Purpose |
+|---|---|---|
+| `propose_action` | `(action_type: str, target: ResourceRef, params: dict, origin: Literal["core_intelligence","cloud_workbench"]) -> ProposalResult` | The only action-layer tool exposed to Core Intelligence or Cloud Workbench. Starts a Temporal workflow (below); `ProposalResult` is queued/executed/denied, never a direct execution result |
+
+**Internal execution tools — never exposed to an agent, called only by the Temporal workflow's `execute_action` Activity**:
 
 | Tool name | Signature (spec) | Purpose |
 |---|---|---|
 | `idp_provision_request` | `(resource_spec: ResourceSpec, requestor: Principal) -> RequestResult` | Submits a provisioning request to IDP |
 | `cmp_container_action` | `(action: ContainerAction, target: ContainerRef) -> ActionResult` | Submits a container action to CMP |
 
-**Risk classification and approval**:
+**Orchestration: Temporal workflow (Governed Automation §3.3)**. One workflow instance per `propose_action` call, running as Activities/Timers/Signals on the Temporal cluster (AKS):
+
 ```
-classify_action_risk(action_payload: ActionPayload) -> RiskTier
+classify_action_risk(action_payload: ActionPayload) -> RiskTier   [Activity]
   Purpose: Determine LOW / MEDIUM / HIGH risk tier for a proposed action.
-  Inputs considered: action type (read/flag vs. resize/terminate), whether the
-  target resource is tagged production, estimated blast radius (single resource
-  vs. multiple).
+  Evaluates OPA policy rules (below) against: action type (read/flag vs.
+  resize/terminate), whether the target resource is tagged production,
+  estimated blast radius (single resource vs. multiple).
   Output: RiskTier enum. HIGH always requires human approval regardless of any
   other factor (hard rule, not a scored threshold).
+
+check_iac_managed(action_payload: ActionPayload) -> IacStatus     [Activity]
+  Purpose: Determine whether the target resource is Terraform-managed
+  (Data Foundations §4.1's Terraform state reference table), before
+  execute_action runs. Runs ahead of execute_action, not inside it.
+  Output: IacStatus { managed_by_iac: bool, drifted: bool }.
+
+execute_action(action_payload: ActionPayload, iac_status: IacStatus) -> ActionResult  [Activity]
+  Purpose: If iac_status.managed_by_iac, call open_terraform_pr or
+  trigger_terraform_run instead of IDP/CMP. Otherwise call
+  idp_provision_request or cmp_container_action depending on action type.
+  Retried per Temporal's built-in retry policy on transient failure;
+  exhausted retries hand off to alert_teams.
+
+open_terraform_pr(action_payload) -> PrResult                     [Activity]
+trigger_terraform_run(action_payload) -> RunResult                [Activity]
+  Purpose: Execute an approved action against a Terraform-managed resource
+  through the IaC pipeline rather than IDP/CMP directly (Governed
+  Automation ADR-004) — a PR against the owning module, or a triggered
+  Terraform Cloud/Enterprise run, depending on which VCS/CI integration
+  the module uses.
+
+alert_teams(action_payload, failure_reason) -> None               [Activity]
+ROLLBACK: rollback_from_snapshot(action_payload) -> RollbackResult [Activity]
 ```
 
 | Component | Name | Purpose |
 |---|---|---|
-| Approval queue table | `action_approval_requests` | `request_id`, `action_payload`, `risk_tier`, `status`, `approver_id`, `decided_at` |
-| Approval service | `approval_queue_service` | Exposes review/approve/reject API for MEDIUM/HIGH tier actions |
+| Approval queue table (Postgres) | `action_approval_requests` | `request_id`, `action_payload`, `risk_tier`, `status`, `approver_id`, `decided_at` — operational state, not Snowflake (Governed Automation ADR-003) |
+| Approval service | `approval_queue_service` | Exposes review/approve/reject API for MEDIUM/HIGH tier actions; an approve/reject call sends a Temporal Signal to the corresponding workflow |
+| Audit table (Snowflake gold) | `gold.fact_action_audit` | `request_id`, `action_payload`, `risk_tier`, `origin`, `outcome`, `executed_at`, `rolled_back` (bool) — synced from Postgres/Temporal history once a workflow completes, for cross-platform reporting (Governed Automation ADR-003) |
 
-**Policy-as-code (enforced independently of agent reasoning)**:
+**Policy-as-code (Open Policy Agent, enforced independently of agent reasoning)**:
 
 | Policy | Name | Rule (described) |
 |---|---|---|
@@ -235,9 +299,9 @@ classify_action_risk(action_payload: ActionPayload) -> RiskTier
 
 ---
 
-## 7. API/Service Layer
+## 7. API/Service Layer (Phase 2)
 
-**Service**: `cost-intelligence-api` (containerized, versioned independently of the Cloud Workbench conversational endpoint).
+**Service**: `cost-intelligence-api` (containerized, versioned independently of Phase 5's Cloud Workbench conversational endpoint).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -246,7 +310,7 @@ classify_action_risk(action_payload: ActionPayload) -> RiskTier
 | `GET` | `/v1/recommendations` | List open rightsizing recommendations |
 | `POST` | `/v1/recommendations/{id}/action` | Accept/reject a recommendation (routes through the same risk/approval logic as Section 6) |
 
-OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal developer portal for self-service discovery by other teams (satisfies FR5 in the Self-Serve Foundations doc).
+OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal developer portal for self-service discovery by other teams (satisfies FR1 in the Self-Serve Foundations doc).
 
 ---
 
@@ -258,8 +322,10 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 |---|---|---|
 | `modules/aks-cluster` | Reusable | The AKS cluster hosting all platform services |
 | `modules/storage-account` | Reusable | Raw/landing zone storage |
-| `modules/databricks-workspace` | Reusable | The lakehouse workspace hosting bronze/silver/gold jobs (Sections 2–3), including mediation compute |
-| `modules/graph-store` | Reusable | Knowledge graph database instance |
+| `modules/snowflake-platform` | Reusable | The Snowflake account objects hosting bronze/silver/gold (Sections 2–3): databases, schemas, virtual warehouses (sized separately for ingestion/transform vs. ML training vs. BI serving), roles, row access policies, and masking policies |
+| `modules/graph-store` | Reusable | The Neo4j instance backing the knowledge graph (Section 4, Data Foundations ADR-004) |
+| `modules/postgres` | Reusable | A Postgres instance provisioning two logical databases: the pgvector-enabled documentation index (Section 5, Cloud Workbench ADR-006) and the action-approval/workflow operational state (Section 6, Governed Automation ADR-003) |
+| `modules/temporal-cluster` | Reusable | The Temporal cluster orchestrating Governed Automation's proposed-action workflows (Section 6, Governed Automation ADR-002) |
 
 **Kubernetes namespaces**: `ns-cloud-workbench-prod`, `ns-cloud-workbench-staging`, `ns-mlops-prod`, one namespace per environment/domain for RBAC and resource-quota isolation.
 
@@ -283,6 +349,8 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 |---|---|
 | `audit.workbench_query_log` | `request_id`, `user_id`, `vertical_id`, `query_text`, `retrieved_refs` (JSON), `model_input`, `model_output`, `action_taken` (nullable), `risk_tier` (nullable), `timestamp` |
 
+Governed Automation's action-level audit trail is separate: Temporal's own workflow history captures every state transition for a proposed action as it happens, and `gold.fact_action_audit` (Section 6) is the queryable, reportable copy synced once a workflow completes — this table logs the query/generation side of Cloud Workbench, not action execution.
+
 **Tracing**: OpenTelemetry instrumentation across every node in Section 5's LangGraph workflow and every Section 6 action call, span attributes include `request_id`, `vertical_id`, `node_name`, `duration_ms`.
 
 **Eval gate artifact**: `eval_set_cost_queries.yaml`, a curated set of representative queries with expected answer characteristics (not exact strings, expected supporting facts), run by CI job `job_run_eval_gate` on every prompt/retrieval/model change.
@@ -298,4 +366,4 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 
 ## 10. What This Specification Deliberately Omits
 
-Per the framing of this artifact: no SQL DDL, no Python/Spark implementation code, no actual Terraform HCL, no LangGraph Python graph definitions. An implementing engineer would write all of that against this specification, table names, column lists, function signatures, and policy names given here should be sufficient to build consistently without inventing the structure from scratch.
+Per the framing of this artifact: no SQL DDL, no dbt model SQL or Snowpark Python implementation code, no actual Terraform HCL, no LangGraph Python graph definitions. An implementing engineer would write all of that against this specification, table names, column lists, function signatures, and policy names given here should be sufficient to build consistently without inventing the structure from scratch.
