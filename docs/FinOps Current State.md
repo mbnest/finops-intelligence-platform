@@ -77,6 +77,10 @@ AWS / Azure / GCP billing & usage files
 
 ## Process & Capability Inventory
 
+### Team & Capacity
+
+A 2-person team performs everything in this section: enhancing the existing tooling, generating and distributing reports, fielding ad hoc questions from business verticals, and the proactive analysis (anomaly review, rightsizing, forecasting) described below — per conversational recollection, not a confirmed org chart. The team lead spends roughly 50% of their time on operational matters — stakeholder follow-ups, RI/commitment planning and laddering, PO handling — leaving roughly half their time for the proactive/analytical work described in this section. Not confirmed: the second team member's own time split, or whether any partial/shared support exists outside this immediate team.
+
 ### Reporting Process
 1. **Data Verification** — manual review of cloud vendor data for accuracy.
 2. **Reconciliation Verification** — reconciliation of cost data back to APM ID during processing; *it is not confirmed who verifies this step or how*.

@@ -110,7 +110,7 @@ flowchart TD
     CWEXP <-->|push signals, pull aggregated views| CASST
 ```
 
-**A naming note**: "Cloud Workbench" is the name used throughout this document set for the agentic, conversational self-serve product designed in Phase 5 (chat, and — planned — push/pull channels and what-if analysis). It is a deliberately different name from the organization's existing "Internal Assistant" tool shown above — see the naming note at the top of [Solution_Architecture_Cloud_Workbench.md](Solution_Architecture_Cloud_Workbench.md) for why. 
+**A naming note**: "Cloud Workbench" is the name used throughout this document set for the agentic, conversational self-serve product designed in Phase 5 (chat, and — planned — push/pull channels and what-if analysis). It is a deliberately different name from the organization's existing "Internal Assistant" tool shown above — see the naming note at the top of [Solution_Architecture_Cloud_Workbench.md](Solution_Architecture_Cloud_Workbench.md) for why.
 
 | Box | Purpose | Detailed In |
 |---|---|---|

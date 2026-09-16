@@ -66,3 +66,9 @@ Power BI connects natively to Snowflake Semantic Views for governed metrics, fal
 ## 5. Notes
 
 No architecture decisions specific to this phase are recorded here — the REST API is a straightforward, versioned wrapper over data and logic already governed elsewhere (Data Foundations' semantic layer, Governed Automation's `propose_action`), and the dashboard path is entirely Data Foundations' design. The decisions worth recording live in those documents, not duplicated here.
+
+## 6. Glossary
+
+Every term this document uses — Semantic Views, gold layer, governed metrics, `propose_action` — is already defined in Data Foundations' or Governed Automation's glossary, cited throughout above; not repeated here to avoid a second, driftable copy.
+
+**`cost-intelligence-api`** — This phase's REST API (Build Specification §7); the one thing named here and nowhere else in the document set.
