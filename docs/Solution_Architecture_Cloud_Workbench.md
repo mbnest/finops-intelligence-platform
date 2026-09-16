@@ -10,7 +10,7 @@ Requirements, org details, and specific tool choices below are **inferred** from
 
 ## 1. Executive Summary
 
-**Cloud Workbench** is a natural-language, agentic interface over the Data Foundations layer's conformed cost, usage, and APM data. Its primary purpose is narrower than "self-serve everything": let a business vertical ask why their bill looks the way it does ("why did this go up," "why is this resource so expensive") without emailing or calling the FinOps team — deflecting the reactive Q&A load the FinOps team currently absorbs manually, not replacing the FinOps team's own reporting and recommendation work. Internal (FinOps/platform team) sessions get a wider capability set, including proposing governed actions that route through Governed Automation — External (vertical) sessions do not, by design; see §2.2's FR4/FR6 and §4.1's persona resolution. This is a deliberate, standing product boundary, not a placeholder for Governed Automation's immaturity — Governed Automation is already live and mature by the time this phase ships.
+**Cloud Workbench** is a natural-language, agentic interface over the Data Foundations layer's conformed cost, usage, and APM data. Its primary purpose is narrower than "self-serve everything": let a business vertical ask why their bill looks the way it does ("why did this go up," "why is this resource so expensive") without emailing or calling the FinOps team — deflecting the reactive Q&A load the FinOps team currently absorbs manually, not replacing the FinOps team's own reporting and recommendation work. Platform (FinOps/platform team) sessions get a wider capability set, including proposing governed actions that route through Governed Automation's Orchestrator (which in turn calls the Guardrail Engine for a risk classification — see the naming note at the top of `Solution_Architecture_Governed_Automation.md`) — Vertical sessions do not, by design; see §2.2's FR4/FR6 and §4.1's persona resolution. This is a deliberate, standing product boundary, not a placeholder for Governed Automation's immaturity — Governed Automation is already live and mature by the time this phase ships.
 
 This is fundamentally a **horizontal-platform-serving-verticals** problem: Cloud Platform Services builds and operates the system; the organization's business verticals are its consumers, treated with the same reliability expectations as an external API's customers would demand.
 
@@ -18,16 +18,16 @@ This is fundamentally a **horizontal-platform-serving-verticals** problem: Cloud
 
 ### 2.1 Problem statement (inferred)
 
-Business verticals routinely ask the FinOps team to explain their own bill — "why did this go up," "why is this thing so expensive" — today by email or phone, each one a manual, one-off lookup for whoever on the FinOps team picks it up. By Phase 5, Self-Serve Foundations' API and dashboards (Phase 2) already give programmatic and BI access to the same underlying data, but a vertical still has to know what to look for. Cloud Workbench's scope is answering that class of question directly, in natural language, without a human in the loop for every ask. Governed automated remediation and self-serve action-taking remain Internal-only — the FinOps team continues to be the one deciding what recommendation reaches a vertical and when, via the standardized reports and tools it already uses, not via the agent acting on a vertical's behalf.
+Business verticals routinely ask the FinOps team to explain their own bill — "why did this go up," "why is this thing so expensive" — today by email or phone, each one a manual, one-off lookup for whoever on the FinOps team picks it up. By Phase 5, Self-Serve Foundations' API and dashboards (Phase 2) already give programmatic and BI access to the same underlying data, but a vertical still has to know what to look for. Cloud Workbench's scope is answering that class of question directly, in natural language, without a human in the loop for every ask. Governed automated remediation and self-serve action-taking remain Platform-only — the FinOps team continues to be the one deciding what recommendation reaches a vertical and when, via the standardized reports and tools it already uses, not via the agent acting on a vertical's behalf.
 
 ### 2.2 Functional requirements (inferred)
 
 - FR1: Natural-language query over current and historical multi-cloud cost/usage data, scoped correctly per requesting vertical/account.
 - FR2: Query answers must cite their source data and be explainable on demand.
 - FR3: Support both simple lookups (single metric) and multi-hop questions (cost trend correlated with a specific deployment event).
-- FR4: Support agent-initiated action proposals (e.g., flagging a rightsizing opportunity, opening a ticket), routed through Governed Automation's risk-tiered approval — this document raises the proposal, it does not decide whether it executes. **Internal persona only** — External sessions can ask about a finding but have no path to propose acting on it (§4.1, ADR-007).
-- FR5: Surface Core Intelligence's anomaly/rightsizing findings proactively, not only on-demand. **Internal persona only** — this helps the FinOps team spot findings faster while compiling their own standardized reports; it is not the agent pushing findings to a vertical unprompted.
-- FR6: Resolve the requestor's persona (Internal platform team vs. External vertical, `FinOps Opportunities.md` §2b) before serving a query, and scope the available tool set accordingly — not just the row-level data each tool can see, but which tools (e.g., cross-vertical benchmarking, action proposals) are callable at all for that persona.
+- FR4: Support agent-initiated action proposals (e.g., flagging a rightsizing opportunity, opening a ticket), routed through Governed Automation's risk-tiered approval — this document raises the proposal, it does not decide whether it executes. **Platform persona only** — Vertical sessions can ask about a finding but have no path to propose acting on it (§4.1, ADR-007).
+- FR5: Surface Core Intelligence's anomaly/rightsizing findings proactively, not only on-demand. **Platform persona only** — this helps the FinOps team spot findings faster while compiling their own standardized reports; it is not the agent pushing findings to a vertical unprompted.
+- FR6: Resolve the requestor's persona (Platform persona [FinOps/platform team] vs. Vertical persona [business vertical], `FinOps Opportunities.md` §2b) before serving a query, and scope the available tool set accordingly — not just the row-level data each tool can see, but which tools (e.g., cross-vertical benchmarking, action proposals) are callable at all for that persona.
 
 ### 2.3 Non-functional requirements (inferred)
 
@@ -44,7 +44,7 @@ Business verticals routinely ask the FinOps team to explain their own bill — "
 - Not a general-purpose enterprise chatbot; scope is cloud cost/usage/ops data.
 - Not replacing human approval for high-blast-radius infrastructure changes — that authority lives in Governed Automation, not here.
 - Not attempting real-time (sub-minute) billing reconciliation; inherited from Data Foundations' provider-billing-lag ceiling.
-- **Not opening action-taking or proactive delivery to verticals.** External sessions are reactive, read-only Q&A about their own data — no `propose_action`, no unsolicited findings, no cross-vertical benchmarking (§2.2 FR4/FR5, §4.1). This is a deliberate, standing product boundary: verticals get self-serve *answers*, not self-serve *action-taking*, even though the underlying automation (Governed Automation) is already mature by this phase.
+- **Not opening action-taking or proactive delivery to verticals.** Vertical sessions are reactive, read-only Q&A about their own data — no `propose_action`, no unsolicited findings, no cross-vertical benchmarking (§2.2 FR4/FR5, §4.1). This is a deliberate, standing product boundary: verticals get self-serve *answers*, not self-serve *action-taking*, even though the underlying automation (Governed Automation) is already mature by this phase.
 - **Not generating visualizations/charts.** The agent's output is text, citations, and structured data (tables, numbers) — not rendered charts or a chart specification. Explicitly deferred, not designed here: covering this would mean deciding whether the agent emits a declarative chart spec for client-side rendering, or defers entirely to the existing Power BI path (Data Foundations §4.3), and neither is settled. Anything beyond a simple inline number/table today points the user at the relevant Power BI report.
 - **Not replacing Self-Serve Foundations' API.** Programmatic, non-conversational access to cost/anomaly/recommendation data is already served by the Phase 2 REST API ([Solution_Architecture_Self_Serve_Foundations.md](Solution_Architecture_Self_Serve_Foundations.md) §4.1); this document adds a conversational surface on top of the same underlying data, not a second API.
 - **Not building a second, purpose-built long-term memory store.** Long-term recall reuses the existing audit log (§4.1's session memory design) rather than a dedicated memory database, vector store, or summarization pipeline — deliberately the simplest thing that satisfies "a user can come back days later and get relevant context back," not a general-purpose agent-memory system.
@@ -59,7 +59,7 @@ Every piece the orchestrator actually depends on to answer a query — not just 
 
 ```mermaid
 flowchart LR
-    U["User<br/>Internal or External"] --> ORCH
+    U["User<br/>Platform or Vertical"] --> ORCH
 
     subgraph ORCH["Orchestrator (pydantic-graph)"]
         direction TB
@@ -76,7 +76,7 @@ flowchart LR
 
     MCP --> SF["Cortex Analyst + metric catalog<br/>Snowflake gold + semantic layer"]
     MCP --> N4["Neo4j<br/>knowledge graph"]
-    MCP -->|Internal persona only| ACT["propose_action<br/>Governed Automation"]
+    MCP -->|Platform persona only| ACT["propose_action<br/>Governed Automation"]
 
     ORCH -->|generation| LLM["Azure OpenAI<br/>chat model"]
 
@@ -84,7 +84,7 @@ flowchart LR
     RESP --> U
 ```
 
-The persona gate, grounding check, and the Internal-only path to `propose_action` are this diagram's guardrails — dotted lines inside the orchestrator box mark where the node flow *passes through* them, not where the real branching logic lives; §3.2 has the actual decision points. Redis is new here relative to §4.1's prose: ADR-003 already decided to cache at the resolved-parameter level, but never named a technology — see ADR-003 for why Redis, not Postgres, hosts it. Postgres/pgvector is gone from this diagram entirely relative to an earlier version — see ADR-006 for why: the corpus it indexed turned out to be a small, curated metric catalog, better served by a direct Snowflake lookup than a separate vector index.
+The persona gate, grounding check, and the Platform-only path to `propose_action` are this diagram's guardrails — dotted lines inside the orchestrator box mark where the node flow *passes through* them, not where the real branching logic lives; §3.2 has the actual decision points. Redis is new here relative to §4.1's prose: ADR-003 already decided to cache at the resolved-parameter level, but never named a technology — see ADR-003 for why Redis, not Postgres, hosts it. Postgres/pgvector is gone from this diagram entirely relative to an earlier version — see ADR-006 for why: the corpus it indexed turned out to be a small, curated metric catalog, better served by a direct Snowflake lookup than a separate vector index.
 
 ### 3.2 Orchestrator state flow (pydantic-graph nodes)
 
@@ -108,8 +108,8 @@ stateDiagram-v2
     GroundingCheck --> Generate: fail, retry once\n(stricter prompt)
     GroundingCheck --> Abstain: fail twice
     FormatCitations --> RouteToAction
-    RouteToAction --> ProposeAction: action warranted,\nInternal persona only
-    RouteToAction --> [*]: no action, or\nExternal persona
+    RouteToAction --> ProposeAction: action warranted,\nPlatform persona only
+    RouteToAction --> [*]: no action, or\nVertical persona
     ProposeAction --> [*]
     Abstain --> [*]
 ```
@@ -166,7 +166,7 @@ sequenceDiagram
         CW-->>U: abstain — "not enough information"
     else passes
         CW->>CW: format citations
-        opt action warranted, Internal persona
+        opt action warranted, Platform persona
             CW->>A: propose_action(...)
             A-->>CW: queued / executed / denied
         end
@@ -198,9 +198,9 @@ Long-term recall is deliberately not part of this per-request state object — i
 
 ### 4.1 AI consumption layer (Cloud Workbench: RAG + agentic orchestration)
 
-- **Persona resolution (FR6)**: the first node in the workflow (`node_resolve_persona`, Build Specification §5) resolves the requestor's persona — **Internal** (FinOps/platform team) or **External** (a business vertical, `FinOps Opportunities.md` §2b) — from auth/identity context, before any retrieval happens. This sets two things for the rest of the request, not one: the MCP tool set the agent is allowed to call, and the system-prompt variant (External's prompt explicitly instructs the model not to speculate about or reveal another vertical's raw figures even if asked). Concretely:
-  - **External** gets read-only Q&A about its own data: `get_cost_by_account`, `get_anomalies`, `query_graph`, and `get_metric_definition`, all RLS-scoped to its own vertical/accounts (Data Foundations §4.3) — this is what actually answers "why did this go up" or "why is this thing so expensive," so it stays in the tool set. External does **not** get `propose_action` (FR4), `get_peer_benchmark` (cross-vertical comparison, an enrichment beyond explaining one's own bill, deferred), or proactive surfacing (FR5) — none of those are a filtered version of a tool External already has, they're capabilities withheld entirely for this persona.
-  - **Internal** gets everything External has, unrestricted by persona, plus `propose_action`, `get_peer_benchmark`, and FR5's proactive surfacing.
+- **Persona resolution (FR6)**: the first node in the workflow (`node_resolve_persona`, Build Specification §5) resolves the requestor's persona — **Platform** (FinOps/platform team) or **Vertical** (a business vertical, `FinOps Opportunities.md` §2b) — from auth/identity context, before any retrieval happens. This sets two things for the rest of the request, not one: the MCP tool set the agent is allowed to call, and the system-prompt variant (Vertical's prompt explicitly instructs the model not to speculate about or reveal another vertical's raw figures even if asked). Concretely:
+  - **Vertical** gets read-only Q&A about its own data: `get_cost_by_account`, `get_anomalies`, `query_graph`, and `get_metric_definition`, all RLS-scoped to its own vertical/accounts (Data Foundations §4.3) — this is what actually answers "why did this go up" or "why is this thing so expensive," so it stays in the tool set. Vertical does **not** get `propose_action` (FR4), `get_peer_benchmark` (cross-vertical comparison, an enrichment beyond explaining one's own bill, deferred), or proactive surfacing (FR5) — none of those are a filtered version of a tool Vertical already has, they're capabilities withheld entirely for this persona.
+  - **Platform** gets everything Vertical has, unrestricted by persona, plus `propose_action`, `get_peer_benchmark`, and FR5's proactive surfacing.
 
   See ADR-007 for why this is enforced as a distinct orchestration step rather than a prompt instruction alone.
 - **Query understanding & grounding (`node_query_rewrite`)**: resolves conversational references (coreference — "it," "that instance") and, more importantly, *grounds* the query against the same governed sources everything else in this platform reads from, rather than passing raw or loosely-rewritten text to retrieval:
@@ -270,9 +270,9 @@ The full model-governance treatment — impact-assessment screening, human overs
 - *Consequences*: Postgres remains in this platform's stack, but only for Governed Automation's approval-queue state (Governed Automation ADR-003) — no longer a shared, two-logical-database instance (Build Specification §8's `modules/postgres`). No embedding model is called anywhere in Cloud Workbench anymore. If a genuinely free-text corpus (ITSM ticket history, runbooks) gets scoped later — plausibly as part of Cloud Workbench Expansion — this decision should be revisited for that corpus specifically, not reflexively reapplied to whatever gets added.
 
 **ADR-007: Resolve persona and scope the MCP tool set in the orchestration graph, not via a prompt instruction**
-- *Context*: `FinOps Opportunities.md` §2b defines two personas, and this document deliberately narrows what External can do beyond data segregation alone: it's not just "External sees less data," it's "External cannot call certain tools at all" — `propose_action` (action-taking, FR4), `get_peer_benchmark` (cross-vertical comparison), and proactive surfacing (FR5) are withheld entirely for this persona, not merely row-filtered. Row access policies (Data Foundations §4.3) already handle data segregation within a tool call (which rows a query returns); they say nothing about which tools are callable in the first place.
+- *Context*: `FinOps Opportunities.md` §2b defines two personas, and this document deliberately narrows what Vertical can do beyond data segregation alone: it's not just "Vertical sees less data," it's "Vertical cannot call certain tools at all" — `propose_action` (action-taking, FR4), `get_peer_benchmark` (cross-vertical comparison), and proactive surfacing (FR5) are withheld entirely for this persona, not merely row-filtered. Row access policies (Data Foundations §4.3) already handle data segregation within a tool call (which rows a query returns); they say nothing about which tools are callable in the first place.
 - *Decision*: Add `node_resolve_persona` as the first step in the pydantic-graph workflow, resolving persona from auth context and binding a persona-specific MCP tool set and system-prompt variant for the rest of that request — enforced in the orchestration graph, the same place every other guardrail in this document set lives (ADR-001's retrieval routing, Governed Automation ADR-001's risk classification), not left to the model to infer from a prompt and decide whether to comply.
-- *Alternatives considered*: A prompt-only distinction (tell the model which persona it's serving, same tools and data available either way), rejected — this asks the model's own judgment to be the enforcement mechanism for a capability boundary, the exact pattern this document set rejects everywhere else (this document's ADR-001, Governed Automation ADR-001). Relying on row access policy alone without tool-set scoping, rejected as incomplete — RLS restricts row-level data within a tool call, but doesn't stop an External request from calling `propose_action` or `get_peer_benchmark` at all if those tools existed in its tool set without their own persona check.
+- *Alternatives considered*: A prompt-only distinction (tell the model which persona it's serving, same tools and data available either way), rejected — this asks the model's own judgment to be the enforcement mechanism for a capability boundary, the exact pattern this document set rejects everywhere else (this document's ADR-001, Governed Automation ADR-001). Relying on row access policy alone without tool-set scoping, rejected as incomplete — RLS restricts row-level data within a tool call, but doesn't stop a Vertical request from calling `propose_action` or `get_peer_benchmark` at all if those tools existed in its tool set without their own persona check.
 - *Consequences*: One more node and one more piece of request-scoped state (the resolved persona) threaded through the workflow, in exchange for a capability boundary that's enforced the same way as every other guardrail in this platform rather than being the one place prompt compliance is trusted.
 
 **ADR-008: Ground query rewriting against the semantic layer's metric vocabulary and the ontology's entity resolution, rather than passing free text to retrieval**

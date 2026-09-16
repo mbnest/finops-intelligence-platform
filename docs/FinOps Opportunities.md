@@ -56,16 +56,16 @@ Opportunities to deepen the analyses the practice already performs.
 
 Opportunity: design self-serve around two distinct personas, each with different access and needs:
 
-- **Internal** — the FinOps/platform team itself, who need full cross-vertical visibility to do their own job.
-- **External** — business verticals, as customers of the horizontal team. Scoped to their own vertical/account data by default, plus **anonymized, aggregated cross-vertical benchmarks** so a vertical can see how it compares without seeing another vertical's raw numbers. Default benchmark set (assumed, to be confirmed with real stakeholders): rate/percentage-based metrics only — RI/SP coverage %, APM resolution %, anomaly rate — not raw-dollar percentiles, which are easier to reverse-engineer into a peer's actual spend.
+- **Platform** — the FinOps/platform team itself, who need full cross-vertical visibility to do their own job.
+- **Vertical** — business verticals, as customers of the horizontal team. Both personas are internal to the org — "Platform" and "Vertical" describe the relationship (who operates the platform vs. who consumes it), not any distinction between the organization and an outside party. Scoped to their own vertical/account data by default, plus **anonymized, aggregated cross-vertical benchmarks** so a vertical can see how it compares without seeing another vertical's raw numbers. Default benchmark set (assumed, to be confirmed with real stakeholders): rate/percentage-based metrics only — RI/SP coverage %, APM resolution %, anomaly rate — not raw-dollar percentiles, which are easier to reverse-engineer into a peer's actual spend.
 
 | Channel | Primary Persona(s) | Description |
 |---|---|---|
-| Standard reports/dashboards | Internal + External | On-demand view of current spend and chargeback position, replacing "wait for the monthly report" with something always available |
-| Conversational interface (chatbot) | Internal + External | The GenAI/RAG interface from Part 1 — natural-language querying in place of a report request |
-| Published REST APIs | Internal + External (technical/integration consumers) | The governed API from Part 1 — lets other tools and teams consume platform data programmatically, not just through a UI |
-| FinOps signals embedded in existing platforms (push) | External | Cost/anomaly/recommendation signals surfaced directly inside IDP, CMP, Internal Assistant, or wherever verticals already work, rather than requiring a trip to a separate FinOps destination |
-| Vertical self-serve workbench with what-if analysis (pull) | External (built and operated by the horizontal team) | A separate, vertical-facing product that pivots/aggregates existing tools (IDP, CMP, Internal Assistant), current and historical cost data, APM data, and other reference data into one surface for scenario planning — verticals come to the horizontal team's workbench rather than the horizontal team coming to them |
+| Standard reports/dashboards | Platform + Vertical | On-demand view of current spend and chargeback position, replacing "wait for the monthly report" with something always available |
+| Conversational interface (chatbot) | Platform + Vertical | The GenAI/RAG interface from Part 1 — natural-language querying in place of a report request |
+| Published REST APIs | Platform + Vertical (technical/integration consumers) | The governed API from Part 1 — lets other tools and teams consume platform data programmatically, not just through a UI |
+| FinOps signals embedded in existing platforms (push) | Vertical | Cost/anomaly/recommendation signals surfaced directly inside IDP, CMP, Internal Assistant, or wherever verticals already work, rather than requiring a trip to a separate FinOps destination |
+| Vertical self-serve workbench with what-if analysis (pull) | Vertical (built and operated by the horizontal team) | A separate, vertical-facing product that pivots/aggregates existing tools (IDP, CMP, Internal Assistant), current and historical cost data, APM data, and other reference data into one surface for scenario planning — verticals come to the horizontal team's workbench rather than the horizontal team coming to them |
 
 **Opportunity: push and pull as two front ends on one shared platform, not two separate ones.** Build push (FinOps-initiated reporting, suggestions, and automation delivered out to verticals) and pull (a vertical-initiated workbench for their own planning) as distinct product surfaces, matched to their different interaction patterns — notify versus explore. Back both with the *same* governed API(s), semantic layer, and knowledge graph from Part 1, rather than standing up two independently modeled platforms; a separately modeled workbench risks re-fragmenting the shared APM ID that the current practice's cross-functional reuse with Security/GRC already depends on. Scope the IDP/CMP/Internal Assistant integration itself as its own phase — aggregating live views from three existing platforms, each with its own auth and data model, is a meaningfully bigger lift than a dashboard or chatbot and shouldn't be sized as if it were comparable effort.
 
@@ -126,6 +126,8 @@ Because it's keyed on the APM ID, the identity and ownership plumbing this needs
 - Review IAM/permission boundaries — automated remediation needs its own scoped, auditable identity, separate from human access.
 
 **Guardrails**
+
+This is what the solution design (`Solution_Architecture_Governed_Automation.md`) later names the **Guardrail Engine** — the system built to enforce everything below, not a separate future concept.
 
 - Dry-run/simulation mode before any tier moves from "recommend" to "apply."
 - Staged/canary rollout — enable automation for a small cohort of LOW-tier applications first, expand based on results.

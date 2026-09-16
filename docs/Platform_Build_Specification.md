@@ -184,7 +184,7 @@ No vector store in this design — Postgres/pgvector was removed (Cloud Workbenc
 |---|---|---|
 | `get_cost_by_account` | `(account_id: str, period: DateRange) -> CostSummary` | Structured query against `gold.fact_cost_daily`, RBAC-scoped to the requestor's own vertical(s) regardless of persona — the core "why is this thing so expensive" lookup, available to both personas |
 | `get_anomalies` | `(vertical_id: str, period: DateRange, min_severity: str) -> List[Anomaly]` | Query `gold.fact_anomaly`, RBAC-scoped to the requestor's own vertical(s) regardless of persona |
-| `get_peer_benchmark` | `(metric_name: str, vertical_id: str) -> BenchmarkResult` | Returns `metric_peer_percentile_rank` (Data Foundations §4.4) for a rate-based metric only. **Internal persona only** — not in the External tool set (Cloud Workbench ADR-007) |
+| `get_peer_benchmark` | `(metric_name: str, vertical_id: str) -> BenchmarkResult` | Returns `metric_peer_percentile_rank` (Data Foundations §4.4) for a rate-based metric only. **Platform persona only** — not in the Vertical tool set (Cloud Workbench ADR-007) |
 | `query_graph` | `(query: GraphQuery) -> GraphResult` | Executes a scoped Cypher graph traversal against Neo4j (Section 4) |
 | `get_metric_definition` | `(name_or_synonym: str) -> MetricDefinition` | Direct SQL/`SEARCH` lookup against Snowflake Semantic View metadata (Section 4) by name or synonym — no embedding, no vector index. Called both by `node_query_rewrite` (grounding, Cloud Workbench ADR-008) and directly for purely definitional questions |
 
@@ -192,14 +192,14 @@ No vector store in this design — Postgres/pgvector was removed (Cloud Workbenc
 
 | Persona | Tools available |
 |---|---|
-| Internal (FinOps/platform team) | All tools in this section, unrestricted by persona (still RBAC-scoped by vertical/account where applicable) |
-| External (a business vertical) | `get_cost_by_account`, `get_anomalies`, `query_graph`, `get_metric_definition` — **not** `get_peer_benchmark` (cross-vertical comparison, an enrichment beyond explaining one's own bill, Internal-only for now) and **not** `propose_action` (Section 6) |
+| Platform (FinOps/platform team) | All tools in this section, unrestricted by persona (still RBAC-scoped by vertical/account where applicable) |
+| Vertical (a business vertical) | `get_cost_by_account`, `get_anomalies`, `query_graph`, `get_metric_definition` — **not** `get_peer_benchmark` (cross-vertical comparison, an enrichment beyond explaining one's own bill, Platform-only for now) and **not** `propose_action` (Section 6) |
 
 **pydantic-graph nodes** (workflow steps, state machine):
 
 | Node | Name | Function |
 |---|---|---|
-| Resolve persona | `node_resolve_persona` | First node in the graph. Resolves Internal/External from auth context, binds the persona-scoped tool set (above) and system-prompt variant for the rest of the request (Cloud Workbench ADR-007) |
+| Resolve persona | `node_resolve_persona` | First node in the graph. Resolves Platform/Vertical from auth context, binds the persona-scoped tool set (above) and system-prompt variant for the rest of the request (Cloud Workbench ADR-007) |
 | Query rewrite | `node_query_rewrite` | Loads session memory (Redis `session:{session_id}`) for coreference resolution, then grounds the query — metric references via `get_metric_definition`, entity references against `resolve_resource_identity()`, relative time expressions against a concrete `DateRange` — rather than passing free text downstream (Cloud Workbench ADR-008, ADR-009) |
 | Check cache | `node_check_cache` | Looks up `node_query_rewrite`'s resolved parameters in Redis's retrieval-cache key space (Cloud Workbench ADR-003); on hit, skips straight to `node_generate` |
 | Route retrieval | `node_route_retrieval` | Cache miss only. If the question is purely definitional, the definition is already resolved (`node_query_rewrite`) and this routes straight to `node_populate_cache`. Otherwise decides structured/graph path(s) based on query shape, from the tool set `node_resolve_persona` bound |
@@ -253,7 +253,7 @@ check_confidence_threshold(retrieval_scores: List[float]) -> bool
 
 ---
 
-## 6. Action Layer (IDP, CMP Integration)
+## 6. Action Layer / Orchestrator & Guardrail Engine (IDP, CMP Integration)
 
 **Agent-facing tool — the single entry point (Governed Automation §3.2)**:
 
@@ -346,10 +346,11 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 | `modules/snowflake-platform` | Reusable | The Snowflake account objects hosting bronze/silver/gold (Sections 2–3): databases, schemas, virtual warehouses (sized separately for ingestion/transform vs. ML training vs. BI serving), roles, row access policies, and masking policies |
 | `modules/graph-store` | Reusable | The Neo4j instance backing the knowledge graph (Section 4, Data Foundations ADR-004) |
 | `modules/postgres` | Reusable | A Postgres instance provisioning the action-approval/workflow operational state (Section 6, Governed Automation ADR-003). No longer shared with a documentation vector index — that use was removed, Cloud Workbench ADR-006 |
-| `modules/temporal-cluster` | Reusable | The Temporal cluster orchestrating Governed Automation's proposed-action workflows (Section 6, Governed Automation ADR-002) |
+| `modules/temporal-cluster` | Reusable | The Temporal cluster running the Orchestrator — Governed Automation's proposed-action workflows (Section 6, Governed Automation ADR-002) |
+| `modules/opa-policy-engine` | Reusable | The OPA (Open Policy Agent) instance running the Guardrail Engine — the policy-decision point the Orchestrator consults for risk classification (Section 6, Governed Automation §3.1). Previously had no infrastructure module of its own |
 | `modules/redis-cache` | Reusable | The Redis instance backing Cloud Workbench's retrieval-context cache and session memory (Section 5, Cloud Workbench ADR-003, ADR-009) |
 
-**Kubernetes namespaces**: `ns-cloud-workbench-prod`, `ns-cloud-workbench-staging`, `ns-mlops-prod`, one namespace per environment/domain for RBAC and resource-quota isolation.
+**Kubernetes namespaces**: `ns-cloud-workbench-prod`, `ns-cloud-workbench-staging`, `ns-mlops-prod`, `ns-governed-automation-prod`, `ns-governed-automation-staging` (hosts both the Orchestrator and the Guardrail Engine), one namespace per environment/domain for RBAC and resource-quota isolation.
 
 **Container images/Helm charts**:
 
@@ -358,6 +359,8 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 | API service | `chart-cost-intelligence-api` | `cost-intelligence-api` service |
 | MCP server | `chart-mcp-cost-server` | The MCP tool server exposing Section 5/6 tools |
 | Workbench orchestrator | `chart-cloud-workbench-orchestrator` | The pydantic-graph-based orchestration service |
+| Orchestrator | `chart-guardrail-orchestrator` | Governed Automation's Temporal-workflow-based durable orchestration service (Section 6) — previously had no deployable of its own, only the `modules/temporal-cluster` infra module above |
+| Guardrail Engine | `chart-guardrail-engine` | The OPA-based policy-decision service (Section 6) the Orchestrator calls for risk classification — previously had no deployable or infra module at all |
 
 **CI/CD pipeline**: `pipeline-cloud-workbench-ci`, stages: `test` (unit/integration) → `eval-gate` (runs `eval_set_cost_queries.yaml` against any prompt/retrieval/model change) → `deploy-staging` → `canary-prod` (10/50/100 traffic increments per the staged-rollout pattern).
 

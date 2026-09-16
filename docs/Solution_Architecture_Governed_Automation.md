@@ -4,11 +4,13 @@ Phase 3 of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solu
 
 Requirements, org details, and specific tool choices below are **inferred** from JD language and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §6.
 
+**A naming note.** "Governed Automation" is this document's phase name, matching the rest of this document set's phase-titled documents. What it designs is two distinct components, not one merged engine, each with its own name for when it needs to be referred to on its own: the **Orchestrator** (Temporal) runs the durable workflow every proposed action becomes — sequencing, timers, signals, retries, rollback — and decides nothing about risk itself; the **Guardrail Engine** (OPA) is the policy-decision point the Orchestrator calls out to for a LOW/MEDIUM/HIGH classification before proceeding. The Guardrail Engine's name is deliberately drawn from `FinOps Opportunities.md` §2c's own "Guardrails" framing (dry-run, canary, caps, audit trail, kill switch), since that's exactly what this system implements — not a new concept, just the existing one given a name. Off-the-shelf technology (Temporal, OPA, Postgres) keeps its own real name throughout this document, consistent with how Neo4j, Redis, and Snowflake are treated elsewhere in this document set — only the bespoke policy/workflow design this document produces gets a custom name.
+
 ---
 
 ## 1. Executive Summary
 
-This is the layer that decides what happens to an optimization action proposed by Core Intelligence (a rightsizing/anomaly finding) or, later, Cloud Workbench (a user-initiated request): execute it automatically, execute it with a delay and opt-out, or hold it for mandatory human approval — classified by risk, enforced in code, never left to the proposing system's own judgment. At this phase, Core Intelligence and the Self-Serve Foundations API (`propose_action`'s `origin: "core_intelligence"` and internal-team API calls) are this layer's only proposal sources — Cloud Workbench doesn't exist yet (it's Phase 5, sequenced *after* this layer, per [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md#master-level-architecture-decisions)'s ADR-M1) and becomes a third source once it ships, through the same `propose_action` entry point, no design change required here.
+This is the layer — its two components together, the **Orchestrator** and the **Guardrail Engine** — that decides what happens to an optimization action proposed by Core Intelligence (a rightsizing/anomaly finding) or, later, Cloud Workbench (a user-initiated request): execute it automatically, execute it with a delay and opt-out, or hold it for mandatory human approval — classified by risk, enforced in code, never left to the proposing system's own judgment. It is an **umbrella over every proposal source**, not a step in any one source's pipeline: Core Intelligence and Cloud Workbench (and anything added later) are clients that call into the Orchestrator through one shared entry point, never each other, and never the Guardrail Engine directly. At this phase, Core Intelligence and the Self-Serve Foundations API (`propose_action`'s `origin: "core_intelligence"` and internal-team API calls) are this layer's only proposal sources — Cloud Workbench doesn't exist yet (it's Phase 5, sequenced *after* this layer, per [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md#master-level-architecture-decisions)'s ADR-M1) and becomes a third source once it ships, through the same `propose_action` entry point, no design change required here.
 
 ## 2. Business Context & Requirements
 
@@ -48,8 +50,11 @@ flowchart TD
     CI["Core Intelligence<br/>finding"] -->|propose_action, single entry point| P[Proposed action]
     CW["Cloud Workbench<br/>node_route_action<br/>Phase 5, added later"] -->|propose_action, single entry point| P
 
-    subgraph WF["Temporal workflow — one instance per proposed action"]
-        P --> R["classify_action_risk (Activity)<br/>OPA policy rules"]
+    subgraph WF["Orchestrator (Temporal) — one workflow instance per proposed action"]
+        P --> R
+        subgraph GUARD["Guardrail Engine (OPA) — policy decision"]
+            R["classify_action_risk (Activity)<br/>OPA policy rules"]
+        end
         R -->|LOW| AUTO[Automatic execution<br/>+ notification]
         R -->|MEDIUM| DELAY["Delayed execution<br/>+ opt-out window (Timer)"]
         R -->|HIGH| HUMAN["Mandatory human approval<br/>(Signal, from approval queue)"]
@@ -146,6 +151,10 @@ Educated assumptions carried over from `FinOps Opportunities.md`'s open items, s
 ## 5. Glossary
 
 **Blast radius** — A hard limit on how much an autonomous action can affect, enforced in code.
+
+**Guardrail Engine** — The policy-decision component (OPA) this document designs: classifies a proposed action into LOW/MEDIUM/HIGH risk (action type, target classification, blast radius), consulted by the Orchestrator, never called directly by a proposing system. Named for `FinOps Opportunities.md` §2c's "Guardrails" framing.
+
+**Orchestrator** — The durable-workflow component (Temporal) this document designs: sequencing, the MEDIUM-tier opt-out timer, the HIGH-tier approval wait, retries, and conditional rollback for every proposed action. The single umbrella every proposal source (Core Intelligence, the Self-Serve API, Cloud Workbench) routes through via `propose_action`, never bypassed — decides nothing about risk itself, calls the Guardrail Engine for that. "Governed Automation" remains this document's phase name for the Orchestrator and Guardrail Engine together.
 
 **Open Policy Agent (OPA)** — A policy-as-code engine used here to evaluate risk-classification rules (blast radius, production gate) as versioned, testable policy rather than inline conditional logic.
 

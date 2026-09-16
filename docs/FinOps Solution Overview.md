@@ -17,7 +17,7 @@ It carries the same caveat as the rest of this document set: written from an out
 
 ## Executive Summary
 
-The target state is one governed Snowflake platform, built in five phases, that every downstream capability — reporting, ML, automation, chat — reads from as a single source of truth, replacing today's SQL-Server-and-PowerShell pipeline outright rather than integrating with it (Phase 1). On top of that foundation: Core Intelligence trains and serves the anomaly-detection, rightsizing, and RI/SP models that the FinOps team currently runs by somewhat manually on a monthly cycle, while Self-Serve Foundations exposes the same governed data through a REST API and native Power BI dashboards (Phase 2); Governed Automation lets validated recommendations execute automatically within risk-tiered guardrails instead of sitting in a queue for someone to action manually (Phase 3); Financial Process Automation moves bill verification from manual reconciliation to exception-based review (Phase 4); and Cloud Workbench, sequenced last and only once the foundation beneath it is proven, gives both the FinOps/platform team (natural-language Q&A plus the ability to propose governed actions) and business verticals (Q&A only — "why did this cost go up" — without opening a ticket) a conversational interface over the same governed data (Phase 5). Planned beyond that base: Cloud Workbench Expansion turns this into an actual workbench by pushing FinOps signals into the tools teams already use — IDP, CMP, Internal Assistant — and pulling from them into a vertical-facing what-if surface, so a vertical can model a change to its footprint before making it, not just ask why a past one cost what it did.
+The target state is one governed Snowflake platform, built in five phases, that every downstream capability — reporting, ML, automation, chat — reads from as a single source of truth, replacing today's SQL-Server-and-PowerShell pipeline outright rather than integrating with it (Phase 1). On top of that foundation: Core Intelligence trains and serves the anomaly-detection, rightsizing, and RI/SP models that the FinOps team currently runs by somewhat manually on a monthly cycle, while Self-Serve Foundations exposes the same governed data through a REST API and native Power BI dashboards (Phase 2); Governed Automation's Guardrail Engine lets validated recommendations execute automatically within risk-tiered guardrails instead of sitting in a queue for someone to action manually (Phase 3); Financial Process Automation moves bill verification from manual reconciliation to exception-based review (Phase 4); and Cloud Workbench, sequenced last and only once the foundation beneath it is proven, gives both the FinOps/platform team (natural-language Q&A plus the ability to propose governed actions) and business verticals (Q&A only — "why did this cost go up" — without opening a ticket) a conversational interface over the same governed data (Phase 5). Planned beyond that base: Cloud Workbench Expansion turns this into an actual workbench by pushing FinOps signals into the tools teams already use — IDP, CMP, Internal Assistant — and pulling from them into a vertical-facing what-if surface, so a vertical can model a change to its footprint before making it, not just ask why a past one cost what it did.
 
 None of this replaces the practice described in [FinOps Current State.md](FinOps%20Current%20State.md) — the strong tagging discipline, the true chargeback model, and the domain knowledge encoded in the existing reconciliation logic all carry forward, per [FinOps Opportunities.md](FinOps%20Opportunities.md)'s own framing: this is an addition to a strong foundation, not a fix for something broken. What changes is what's manual or semi-manual today — continuous governed ingestion instead of a monthly batch, models instead of ad hoc analysis, self-serve instead of an inbox, and automatic execution within guardrails instead of recommendations nobody has time to action.
 
@@ -76,15 +76,32 @@ flowchart TD
     SEM -->|governed metrics| PBI["Power BI<br/>existing"]
     LAKE -.->|ad hoc SQL, not yet in semantic layer| PBI
 
-    subgraph P2["Phase 2 — Core Intelligence & Self-Serve Foundations"]
-        SEM --> MLOPS["Core Intelligence: anomaly detection,<br/>rightsizing, RI/SP modeling"]
+    subgraph P2SS["Phase 2 — Self-Serve Foundations"]
         SEM --> API["Self-Serve API +<br/>dashboards (non-agentic)"]
     end
 
-    subgraph P3["Phase 3 — Governed Automation"]
-        MLOPS --> ACT["Risk tiering + contract"]
-        API --> ACT
+    subgraph HARNESS["Agentic & automation harness — Phase 2's Core Intelligence, Phase 3, and Phase 5, interconnected"]
+        subgraph P2CI["Phase 2 — Core Intelligence"]
+            SEM --> MLOPS["Core Intelligence: anomaly detection,<br/>rightsizing, RI/SP modeling"]
+        end
+
+        subgraph P3["Phase 3 — Governed Automation"]
+            ORCH[["Orchestrator (Temporal)<br/>durable workflow"]]
+            GUARD[["Guardrail Engine (OPA)<br/>policy decision: LOW/MED/HIGH"]]
+            ORCH -->|classify_action_risk| GUARD
+            GUARD -->|risk tier| ORCH
+        end
+
+        subgraph P5["Phase 5 — Cloud Workbench"]
+            SEM --> CW["Cloud Workbench:<br/>agentic chat, Platform + Vertical"]
+            CW --> CWEXP["Push + pull channels,<br/>what-if analysis — planned extension"]
+        end
+
+        MLOPS -->|propose_action| ORCH
+        CW -->|propose_action, Platform persona only| ORCH
     end
+
+    API -->|propose_action| ORCH
 
     subgraph EXIST["Existing the organization Platforms — integrated with, not built here"]
         IDP["IDP<br/>existing"]
@@ -92,17 +109,11 @@ flowchart TD
         CASST["Internal Assistant<br/>existing, real tool"]
     end
 
-    ACT -->|execute approved action| IDP
-    ACT -->|execute approved action| CMP
+    ORCH -->|execute approved action| IDP
+    ORCH -->|execute approved action| CMP
 
     subgraph P4["Phase 4 — Financial Process Automation"]
         SEM --> BILL["Bill verification:<br/>exception-based review"]
-    end
-
-    subgraph P5["Phase 5 — Cloud Workbench"]
-        SEM --> CW["Cloud Workbench:<br/>agentic chat, Internal + External"]
-        ACT --> CW
-        CW --> CWEXP["Push + pull channels,<br/>what-if analysis — planned extension"]
     end
 
     CWEXP <-->|push signals, pull aggregated views| IDP
@@ -111,6 +122,10 @@ flowchart TD
 ```
 
 **A naming note**: "Cloud Workbench" is the name used throughout this document set for the agentic, conversational self-serve product designed in Phase 5 (chat, and — planned — push/pull channels and what-if analysis). It is a deliberately different name from the organization's existing "Internal Assistant" tool shown above — see the naming note at the top of [Solution_Architecture_Cloud_Workbench.md](Solution_Architecture_Cloud_Workbench.md) for why.
+
+**Another naming note**: the two double-bordered boxes inside Phase 3 above are, together, what Governed Automation designs — split to show they're genuinely different components, not one merged system. The **Orchestrator** is Temporal, running the durable workflow (sequencing, the MEDIUM-tier opt-out timer, the HIGH-tier approval wait, retries, rollback) — it decides nothing about risk itself. The **Guardrail Engine** is OPA, the policy-decision point the Orchestrator calls out to for a LOW/MEDIUM/HIGH classification before proceeding. "Governed Automation" remains the phase name for both together; see the naming note at the top of [Solution_Architecture_Governed_Automation.md](Solution_Architecture_Governed_Automation.md).
+
+**On the larger box**: Phase 2's Core Intelligence, Phase 3, and Phase 5 are drawn inside one enclosing "harness" box because they function as one interconnected system, not three independent phases that happen to be adjacent — every proposed action from Core Intelligence's models or Cloud Workbench's agent calls into the same Orchestrator through the identical `propose_action` entry point, and nothing in that path treats the two sources differently. Phase 2's Self-Serve Foundations (the REST API/dashboards) sits outside the harness box — it's non-agentic and its own action-proposal calls (FR2's accept/reject) cross into the Orchestrator from outside, the same way Phase 1's data foundation and Phase 4's bill verification remain their own standalone boxes underneath and beside it.
 
 | Box | Purpose | Detailed In |
 |---|---|---|
@@ -124,7 +139,8 @@ flowchart TD
 | Core Intelligence | Trains, versions, and serves the anomaly-detection, rightsizing, and RI/savings-plan models (via Snowpark ML) that read from the gold-layer tables and write findings back as facts | MLOps Pipeline document (entire) |
 | Self-Serve API + dashboards | Non-agentic, programmatic self-serve: a governed REST API for other internal teams/tools, plus native Power BI dashboards — no chat interface at this phase | Self-Serve Foundations (entire); Build Specification §7 |
 | Cloud Workbench (chatbot) | Natural-language, agentic self-serve interface — Phase 5, after Core Intelligence, the API/dashboards layer, and Governed Automation are established — retrieving from the Neo4j knowledge graph and gold-layer tables (via Snowflake Cortex Analyst), with definitional questions answered by direct lookup against the Semantic View metric catalog rather than a vector store (Cloud Workbench ADR-001, ADR-006), to generate grounded, cited answers | Cloud Workbench §4.1; Build Specification §5 |
-| Governed Automation (risk tiering + contract) | Classifies a proposed optimization action into LOW/MEDIUM/HIGH risk and routes it to automatic execution, delayed execution with opt-out, or mandatory human approval — enforced in code via policy-as-code, not the proposing system's own judgment | Governed Automation §3; Build Specification §6 |
+| Orchestrator (Temporal) | Runs the durable workflow every proposed action becomes: sequencing, the MEDIUM-tier opt-out timer, the HIGH-tier approval wait, retries, and conditional rollback. The umbrella every proposal source (Core Intelligence, Self-Serve API, Cloud Workbench) routes through via `propose_action`, never bypassed — it decides nothing about risk itself, it calls the Guardrail Engine for that | Governed Automation §3.3; Build Specification §6 |
+| Guardrail Engine (OPA) | The policy-decision point the Orchestrator consults for every proposed action: classifies it into LOW/MEDIUM/HIGH risk (action type, target classification, blast radius) via policy-as-code, not the proposing system's own judgment or the Orchestrator's | Governed Automation §3.1, §3.3; Build Specification §6 |
 | IDP, CMP | the organization's existing infrastructure-provisioning and container-management platforms — Governed Automation calls these to actually execute an approved action; they aren't being replaced or rebuilt | Governed Automation §3; Build Specification §6 |
 | Bill verification | Reconciles invoiced line items against contracted rates and expected usage, producing a confidence score that routes high-confidence/low-impact items to auto-clear and everything else to a human reviewer | MLOps Pipeline §1.1 — problem statement only, no dedicated design yet |
 | Cloud Workbench Expansion | Adds push (signals embedded in IDP/CMP/the real Internal Assistant) and pull (a vertical-facing what-if/scenario surface aggregating those same tools plus cost/APM/reference data) to Phase 5's Cloud Workbench, submitting what-if results into Governed Automation | Planned — no sub-document yet |
@@ -170,8 +186,8 @@ Every item from the Opportunities document, traced to the solution component tha
 | Standard reports/dashboards | API/service layer (thin view), or Power BI connected to Snowflake Semantic Views | Self-Serve Foundations §4.2; Data Foundations ADR-002, ADR-003 | **Treated as a thin view for now** — review existing Power BI reports for reuse. Repointing them at Semantic Views (or gold directly, as a fallback for metrics not yet modeled) is native (Data Foundations ADR-002, ADR-003, no separate serving path to build), likely less rework than a net-new API/service-layer integration per report if the existing reports are largely SQL-shaped already, but this is unconfirmed. That review must also audit each report's own DAX measures for logic duplicating a Semantic View metric (Data Foundations §4.3) — repointing the query source doesn't by itself remove a local, independently-computed version of the same metric. A dedicated sub-document may be needed depending on what that review finds |
 | Conversational interface (chatbot) | AI consumption layer (Cloud Workbench) | Cloud Workbench §4.1 | Detailed — Phase 5, not Phase 2 (see ADR-M1) |
 | Published REST APIs | API/service layer | Self-Serve Foundations §4.1 | Detailed — Phase 2, non-agentic |
-| Persona-scoped access (Internal vs. External tool sets and data exposure) | Cloud Workbench persona resolution | Cloud Workbench §4.1, ADR-007 | Detailed |
-| Anonymized cross-vertical benchmarking, exposed to verticals | Cloud Workbench Expansion | — | **Planned** — the underlying rate-based metric (`metric_peer_percentile_rank`, Data Foundations §4.4) exists and is queryable by the Internal persona today (Cloud Workbench `get_peer_benchmark`), but not yet exposed to External/vertical sessions — a deliberate scope boundary (Cloud Workbench §2.4), not a missing metric |
+| Persona-scoped access (Platform vs. Vertical tool sets and data exposure) | Cloud Workbench persona resolution | Cloud Workbench §4.1, ADR-007 | Detailed |
+| Anonymized cross-vertical benchmarking, exposed to verticals | Cloud Workbench Expansion | — | **Planned** — the underlying rate-based metric (`metric_peer_percentile_rank`, Data Foundations §4.4) exists and is queryable by the Platform persona today (Cloud Workbench `get_peer_benchmark`), but not yet exposed to Vertical sessions — a deliberate scope boundary (Cloud Workbench §2.4), not a missing metric |
 | Push: FinOps signals embedded in IDP/CMP/Internal Assistant | Cloud Workbench Expansion | — | **Planned** — extension of Governed Automation plus a new embedding spec, building on top of Phase 5's now-designed Cloud Workbench base. "Internal Assistant" here is the real, existing the organization tool, distinct from Cloud Workbench |
 | Pull: vertical self-serve workbench + what-if analysis | Cloud Workbench Expansion | — | **Planned** — new sub-document needed, extending Cloud Workbench (Phase 5) |
 
@@ -266,4 +282,6 @@ Data Foundations, Self-Serve Foundations, and Governed Automation were originall
 
 **Cloud Workbench** — The agentic, conversational self-serve product this document set designs, scoped to Phase 5 (not Phase 2, see ADR-M1) — chat today, planned to expand with push (signals embedded in tools verticals already use) and pull (a vertical-facing what-if surface for scenario planning) channels. Distinct from Self-Serve Foundations' Phase 2 REST API and dashboards, which are non-agentic and exist earlier. Deliberately not named "Internal Assistant," which refers to the organization's real, existing tool — see the naming note under Solution Overview above.
 
-**Contract (automation consent)** — The per-application, per-vertical record of what automated actions are pre-approved, keyed on the APM ID, that the action layer consults before acting on anything beyond the advisory-only default.
+**Contract (automation consent)** — The per-application, per-vertical record of what automated actions are pre-approved, keyed on the APM ID, that the Guardrail Engine consults before acting on anything beyond the advisory-only default.
+
+**Guardrail Engine** — The system Phase 3 (Governed Automation) designs: risk-tiering, orchestration, and execution, sitting as a single umbrella every proposed action (Core Intelligence, Self-Serve API, Cloud Workbench) routes through via `propose_action`, never bypassed. "Governed Automation" is the phase name; "Guardrail Engine" is the system itself — see the naming note at the top of [Solution_Architecture_Governed_Automation.md](Solution_Architecture_Governed_Automation.md).
