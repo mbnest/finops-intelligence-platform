@@ -112,10 +112,10 @@ Models are served via a versioned internal API (consistent with the Self-Serve F
 
 Distinct from §2.4's drift-monitoring *triggers* (the "when to retrain" logic), this is the tooling that makes model health visible day to day:
 
-- **Infrastructure metrics**: Prometheus scraping the AKS-hosted scoring services (latency, throughput, error rate), visualized in Grafana — the same pattern used for any other AKS workload on the platform, not a bespoke ML monitoring stack.
+- **Infrastructure metrics**: Datadog Infrastructure Monitoring on the AKS-hosted scoring services (latency, throughput, error rate) — the same pattern used for any other AKS workload on the platform (Data Foundations §4.5), not a bespoke ML monitoring stack.
 - **Model-quality metrics**: scheduled Evidently AI drift/quality reports (§2.1) written back to a `gold.model_quality_metrics`-style table, following the same "write facts back to Snowflake" pattern §2.5 already uses for predictions — queryable by Cloud Workbench and reportable through the same BI path as everything else (Data Foundations ADR-003).
-- **Alerting**: Prometheus Alertmanager for infrastructure thresholds; model-quality alerts (drift crossing a threshold, false-positive rate climbing) route through whatever enterprise alerting/ITSM channel the platform already uses (a placeholder reference source per `FinOps Opportunities.md` §2b), rather than a second, ML-specific alerting system.
-- **Tracing**: OpenTelemetry spans across the feature-computation-to-scoring pipeline, consistent with the per-stage tracing Cloud Workbench uses for its own query path (§4.2) — one tracing backbone for the platform, not two.
+- **Alerting**: Datadog Monitors for infrastructure thresholds; model-quality alerts (drift crossing a threshold, false-positive rate climbing) route through the same Datadog Monitors, onward to whatever enterprise ITSM channel Datadog is already integrated with (not confirmed which one, per `FinOps Opportunities.md` §2b), rather than a second, ML-specific alerting system.
+- **Tracing**: OpenTelemetry spans across the feature-computation-to-scoring pipeline, exported to Datadog APM — consistent with the per-stage tracing Cloud Workbench (§4.2) and Data Foundations (§4.5) use for their own stages — one tracing backbone for the platform, not two.
 - **Review cadence**: real-time infra metrics reviewed by on-call as part of normal ops; data-quality checks daily; model performance weekly; fairness/drift and the §3.2 subgroup review monthly; a full strategic review of the model portfolio quarterly. Cadence, not a fixed SLA, because none of this is a customer-facing uptime commitment.
 
 ### 2.7 Explainability and governance

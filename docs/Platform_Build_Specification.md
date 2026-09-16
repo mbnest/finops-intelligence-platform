@@ -375,7 +375,7 @@ Governed Automation's action-level audit trail is separate: Temporal's own workf
 
 This table also serves as Cloud Workbench's long-term memory (Cloud Workbench ADR-009, §4.1) — `session_id` and `user_id` scope a lookup when a user references a prior conversation, reusing this table's existing retention policy and RBAC rather than a second durable store.
 
-**Tracing**: OpenTelemetry instrumentation across every node in Section 5's pydantic-graph workflow and every Section 6 action call, span attributes include `request_id`, `vertical_id`, `node_name`, `duration_ms`.
+**Tracing**: OpenTelemetry instrumentation, exported to Datadog APM (Data Foundations §4.5), across every node in Section 5's pydantic-graph workflow and every Section 6 action call, span attributes include `request_id`, `vertical_id`, `node_name`, `duration_ms`.
 
 **Eval gate artifact**: `eval_set_cost_queries.yaml`, a curated set of representative queries with expected answer characteristics (not exact strings, expected supporting facts), run by CI job `job_run_eval_gate` on every prompt/retrieval/model change.
 

@@ -218,8 +218,8 @@ Long-term recall is deliberately not part of this per-request state object — i
 
 ### 4.2 Observability, evaluation, and governance (specific to this phase)
 
-- **Observability**: per-stage distributed tracing (retrieval, generation, action-proposal), token/cost tracking, retrieval quality metrics, user feedback capture feeding back into the eval set.
-- **Evaluation**: a curated eval set specific to this domain (real cost-querying scenarios, not generic benchmarks), faithfulness/relevance/correctness scoring, required to pass before any prompt, retrieval config, or model change ships.
+- **Observability**: per-stage distributed tracing (retrieval, generation, action-proposal) via OpenTelemetry, exported to Datadog APM — the same platform-wide backbone Data Foundations (§4.5) and MLOps Pipeline (§2.6) use; token/cost tracking, retrieval quality metrics, user feedback capture feeding back into the eval set.
+- **Evaluation**: a curated eval set specific to this domain (real cost-querying scenarios, not generic benchmarks), faithfulness/relevance/correctness scoring, required to pass before any prompt, retrieval config, or model change ships. **Generation, tracking, and management**: authored/reviewed by the FinOps/platform team from representative real query patterns, not synthetic-only; version-controlled as code (`eval_set_cost_queries.yaml`, Build Specification §9) alongside the prompt/retrieval config it gates, so a change to either is reviewable in the same diff; grown over time from the Observability bullet's user-feedback loop (above) as real query patterns emerge, rather than left static after initial authorship.
 - **Governance**: full audit logging of every query and proposed action (what was asked, retrieved, sent to the model, returned, and any action proposed), RBAC enforced at the graph/query layer matching vertical/account boundaries — builds on Data Foundations' shared infrastructure and lineage baseline rather than duplicating it.
 
 ### 4.3 AI governance

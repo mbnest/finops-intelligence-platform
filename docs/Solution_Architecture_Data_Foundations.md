@@ -8,15 +8,13 @@ Requirements, org details, and specific tool choices below are **inferred** from
 
 ## 1. Executive Summary
 
-This is the multi-cloud data platform that conforms AWS, Azure, and GCP billing/usage data — plus Application Portfolio Management (APM) metadata — into one governed, queryable foundation. Every other phase (ML models, the self-serve chat/API product, governed automation, bill verification) reads from this layer rather than reasoning about provider-native schemas or raw source data directly.
-
-> **This is modernization, not greenfield.** Consumption-based pricing analysis, anomaly detection, and operational chargeback reportedly already exist today at the organization, running on PowerShell scripts, an on-prem SQL database, and SQL functions. This document is a governed, scalable replacement for that legacy data pipeline, not a net-new capability invented from nothing.
+This is the multi-cloud data platform that conforms AWS, Azure, and GCP billing/usage data — plus Application Portfolio Management (APM) metadata — into one governed, queryable foundation. Every other phase (ML models, the self-serve chat/API product, governed automation, bill verification) reads from this layer rather than reasoning about provider-native schemas or raw source data directly. This is modernization, not greenfield: consumption-based pricing analysis, anomaly detection, and operational chargeback reportedly already exist today at the organization, running on PowerShell scripts, an on-prem SQL database, and SQL functions — this document is a governed, scalable replacement for that legacy pipeline, not a net-new capability invented from nothing.
 
 ## 2. Business Context & Requirements
 
 ### 2.1 Problem statement (inferred)
 
-Cloud cost and usage data across AWS, Azure, and GCP is fragmented, inconsistently tagged, and requires specialist knowledge to query. Everything built on top of this data — reporting, ML models, a self-serve interface, automated actions — inherits whatever inconsistency exists at this layer, so getting conformance, tagging, and entity resolution right here is the highest-leverage investment in the whole platform.
+AWS, Azure, and GCP each export billing/usage data in a different provider-native schema, and today all of it runs through an on-prem SQL Server database, reconciled by PowerShell scripts and stored procedures on a monthly batch cycle. That pipeline already achieves strong tagging coverage and true chargeback (`FinOps Current State.md`) — it just can't support what's needed next: continuous ingestion, ML-driven analysis, enhanced self-serve interfaces, or automated action, all of which need a governed, queryable platform underneath them, not a monthly script run. Conforming the three providers' schemas onto that platform — carrying forward the reconciliation and tagging logic that already works, not rebuilding it — is the highest-leverage investment in the whole platform, since everything downstream inherits whatever this layer can or can't support.
 
 ### 2.2 Requirements (inferred)
 
@@ -27,12 +25,12 @@ Cloud cost and usage data across AWS, Azure, and GCP is fragmented, inconsistent
 
 ### 2.3 Non-functional requirements (inferred)
 
-| Requirement | Target (inferred) | Rationale |
-|---|---|---|
-| Data freshness | Reflects provider billing lag (typically ~24h) | Provider billing APIs are not real-time by nature — this is a hard ceiling every downstream phase inherits |
-| Auditability | Full lineage from raw to gold, retained per policy | HITRUST/SOC2-equivalent governance posture |
-| Idempotency | Every pipeline stage safely re-runnable without producing duplicate or drifted state | Becomes a hard governance requirement once ML models and an LLM depend on this data being trustworthy |
-| Data segregation | Vertical/account-scoped access enforceable at the catalog/query layer | Foundation for every downstream consumer's own multi-tenancy requirement |
+| Requirement      | Target (inferred)                                                                    | Rationale                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Data freshness   | Reflects provider billing lag (typically ~24h)                                       | Provider billing APIs are not real-time by nature — this is a hard ceiling every downstream phase inherits |
+| Auditability     | Full lineage from raw to gold, retained per policy                                   | SOC2-equivalent governance posture                                                                         |
+| Idempotency      | Every pipeline stage safely re-runnable without producing duplicate or drifted state | Becomes a hard governance requirement once ML models and an LLM depend on this data being trustworthy      |
+| Data segregation | Vertical/account-scoped access enforceable at the catalog/query layer                | Foundation for every downstream consumer's own multi-tenancy requirement                                   |
 
 ### 2.4 Non-goals (inferred)
 
@@ -73,6 +71,7 @@ The sections below detail each layer. This is where the platform's diagram in [F
 | Session memory / retrieval cache | Redis | Backs Cloud Workbench's session memory and retrieval cache (Cloud Workbench ADR-003, ADR-009) — not part of this platform's own storage, listed here for a complete picture. No vector store: Cloud Workbench's definitional questions are answered via a direct Snowflake lookup against the Semantic View metric catalog (below), not embedding-based search (Cloud Workbench ADR-001, ADR-006). |
 | Orchestration | Airflow (or Azure Data Factory) | Named in the JD; schedules ingestion and the dbt/Snowpark transform chain. See Build Specification §1–2. |
 | Infrastructure | AKS, Terraform/Bicep | Shared platform-wide compute and IaC, not specific to this phase. See §4.5. |
+| Observability | Datadog (APM, infrastructure monitoring, log management, dashboards, monitors/alerting), instrumented via OpenTelemetry | the organization's existing observability platform, reused rather than standing up a separate open-source stack. Shared platform-wide, not specific to this phase. See §4.5. |
 
 ---
 
@@ -80,11 +79,15 @@ The sections below detail each layer. This is where the platform's diagram in [F
 
 ### 4.1 Source systems
 
-AWS Cost Explorer/CUR, Azure Cost Management API, GCP Billing Export, plus each provider's usage/telemetry APIs. These three sources have materially different schemas, tag semantics, and refresh cadences — this heterogeneity is the reason the platform's silver stage exists to conform them, rather than exposing provider-native schemas to anything downstream.
+| Source | Description | Why Needed |
+|---|---|---|
+| AWS Cost Explorer / CUR | AWS's native billing/usage export, plus its usage-telemetry APIs | Primary billing/usage source for the AWS portion of the estate |
+| Azure Cost Management API | Azure's native billing/usage export, plus its usage-telemetry APIs | Primary billing/usage source for the Azure portion of the estate |
+| GCP Billing Export | GCP's native billing/usage export, plus its usage-telemetry APIs | Primary billing/usage source for the GCP portion of the estate |
+| Application Portfolio Management (APM) tool | the organization's existing application metadata system — owner, technical contact, classification — with its APM ID tagged onto roughly nearly all of cloud resources and already used by security/compliance for their checks | A materially stronger entity-resolution signal than cloud-native tags alone — an authoritative, organization-level master key, not something derived per-cloud. Feeds the ontology (§4.4); see Build Specification for ingestion and data-quality treatment |
+| Terraform state (read-only, via the organization's state backend — Terraform Cloud/Enterprise API, or a state file in a cloud storage backend) | Resolved infrastructure-as-code state, not the raw `.tf` source — already carries resolved values, directly comparable to a live resource's observed configuration without evaluating variables or modules. Two fields matter downstream: `managed_by_iac`, and a drift flag (live config vs. last-declared) | A rightsizing recommendation or an automated action that only looks at observed utilization can't tell an accidentally over-provisioned resource from a deliberately, approvedly over-provisioned one — that distinction lives in whatever declared the resource. See MLOps Pipeline §2.2 for how this shapes recommendation context, and Governed Automation §3.3 for why this gates direct execution |
 
-> **Additional source: Application Portfolio Management (APM) tool.** the organization reportedly maintains an APM tool holding application metadata (owner, technical contact, classification), with its APM ID tagged onto roughly nearly all of cloud resources and already used by security/compliance for their checks. This is a materially stronger entity-resolution signal than cloud-native tags alone — it's an authoritative, organization-level master key, not something derived per-cloud. See Section 4.4 for how this feeds the ontology, and the Build Specification for the ingestion and data-quality treatment.
-
-> **Additional source: Terraform state (Infrastructure-as-Code).** A rightsizing recommendation or an automated action (Governed Automation) that only looks at observed utilization can't tell an accidentally over-provisioned resource from a deliberately, approvedly over-provisioned one — that distinction lives in whatever declared the resource, not in how it's being used. This platform ingests **Terraform state** (via the organization's state backend — Terraform Cloud/Enterprise API, or a state file in a cloud storage backend) read-only, not the raw `.tf` source: state already carries resolved values, directly comparable to a live resource's observed configuration without evaluating variables or modules. Two fields matter downstream: whether a resource is IaC-managed at all (`managed_by_iac`), and whether its live configuration still matches what Terraform last declared (a drift flag). See MLOps Pipeline §2.2 for how this shapes recommendation context, and Governed Automation §3.3 for why this gates direct execution.
+The three cloud sources have materially different schemas, tag semantics, and refresh cadences — this heterogeneity is the reason the platform's silver stage exists to conform them, rather than exposing provider-native schemas to anything downstream.
 
 ### 4.2 Mediation (implemented as the platform's bronze-to-silver transform)
 
@@ -202,15 +205,20 @@ A starting set, anchored to the questions a business vertical would actually ask
 | Chargeback | "What's my vertical's chargeback amount this month?" | `metric_chargeback_amount` | `metric_total_spend` rolled up to vertical, one month in arrears (Current State's existing chargeback cadence) |
 | Benchmarking | "How do we compare to peer verticals on efficiency, not raw dollars?" | `metric_peer_percentile_rank` | Percentile rank of a rate metric (e.g. `metric_utilization_rate`, `metric_ri_sp_utilization`) against an anonymized peer set — rate-based only, per `FinOps Opportunities.md` §2b's benchmarking design |
 
+#### Ontology and knowledge graph
+
+The entities and relationships that structure this domain, how they're implemented as a queryable graph, and how identity/staleness are handled within it.
+
 - **Ontology**: defines the entities and relationships that structure this domain — Account, Vertical, Resource, Tag, Cost Line Item, Anomaly, Recommendation — and how they relate (a Resource belongs to an Account, an Account rolls up to a Vertical, a Cost Line Item references a Resource and a time period). This is the schema for the graph below. **The `Resource` entity carries the APM ID as its primary cross-cloud key** where available (~nearly all of resources), with Owner, Technical Contact, and Classification modeled as attributes sourced from APM, not re-derived from cloud tags.
+- **Ontology artifact — not yet formalized.** The entity/relationship table above (mirrored in Build Specification §4) is documentation, not a governed artifact in its own right. Neo4j's node labels and relationship types are one *implementation* of the ontology, conflated here with the ontology itself because nothing independent of that implementation exists yet. Given §4.5 already treats the ontology as "a shared contract every downstream phase depends on," it should be authored as a standalone, versioned artifact — OWL or RDFS are the candidate formalisms — with the Neo4j schema and any other consumer required to conform to it, rather than being the definition. Not done here; no target phase assigned.
 - **Knowledge graph**: the ontology, populated and kept current in **Neo4j**, a dedicated property-graph database — not implemented relationally in Snowflake (see ADR-004). Gold-schema tables remain the system of record; a sync job (Build Specification §4) upserts nodes and relationships into Neo4j whenever gold refreshes, sourced from two layers, not one: a node's **static attributes** (resource type, region, tag values) come straight from the relevant gold table, but any **computed property** placed on a node (e.g., a running spend total) is pulled from the semantic layer's governed metric definition (Snowflake Semantic Views, above), never recomputed independently inside the sync job. This is the same discipline ADR-002 established for every other consumer — one governed definition, reused, not re-derived — applied to the graph instead of waived for it. This is what enables **GraphRAG**-style retrieval for Cloud Workbench — questions that are fundamentally relational ("show me all resources tagged to this vertical that had a cost anomaly and a recent deployment") are Cypher graph traversals, not vector similarity lookups and not a join against the gold schema directly.
 - **Entity resolution** happens here: resolve on APM ID first where present — a stronger, organizationally-authoritative signal than cross-cloud tag matching — falling back to fuzzy tag-based matching only for the small unresolved gap. That gap itself is worth tracking as a governance metric: an untagged resource is both a FinOps chargeback blind spot and a security/compliance blind spot, since the same APM ID drives both.
 - **Attribute volatility, handled via Slowly Changing Dimension (SCD Type 2).** The resource-to-application boundary (which resources belong to which app) is structurally stable; the Owner/Technical Contact attributes on top of it are volatile (role changes, departures) and can go stale independent of the boundary itself. Model Owner/Technical Contact as an SCD Type 2 attribute, tracked with effective start/end dates, rather than overwritten in place, so staleness is visible and reconfirmable rather than silently trusted indefinitely.
 
 ### 4.5 Infrastructure & observability (shared across every phase)
 
-- **Infrastructure**: containerized services (Docker) deployed on **AKS**, with **Terraform**/**Bicep** managing infrastructure as versioned, reviewed code. Resource governance (namespace-scoped quotas, RBAC) isolates verticals' workloads from each other on shared infrastructure.
-- **Observability**: per-stage distributed tracing (mediation job, downstream retrieval/generation/action where applicable), token/cost tracking, data-quality and lineage dashboards.
+- **Infrastructure**: AKS hosts this platform's non-Snowflake compute — the orchestrator (**Airflow**, if chosen over native Snowflake Tasks; §3.1), **Neo4j** (the knowledge graph database, §4.4), and the gold-to-Neo4j sync job (Build Specification §4) — as containerized (Docker) services, with **Terraform**/**Bicep** managing all of it as versioned, reviewed code. Resource governance (namespace-scoped quotas, RBAC) isolates verticals' workloads from each other on this shared infrastructure. Everything else in this document (dbt, Snowpark, Semantic Views, Horizon, Time Travel) runs natively inside Snowflake, not on AKS.
+- **Observability**: **Datadog** is the organization's existing observability platform and is reused here rather than standing up a separate stack — infrastructure/AKS workload metrics, log management, and monitors/alerting for the orchestrator, Neo4j, and the sync job. Per-stage tracing (the mediation job, the gold→Neo4j sync) is instrumented via **OpenTelemetry** and exported to Datadog APM, the same tracing backbone Cloud Workbench (§4.2) and MLOps Pipeline (§2.6) use for their own stages — one backbone for the platform, not a separate one per phase. Data-quality results (Build Specification §2's `job_dq_checks`) and lineage (Snowflake Horizon Access History, §4.3) are queried from Snowflake directly, not duplicated into a second dashboard product.
 - **Governance**: lineage from raw provider data through bronze/silver (mediation)/gold, full audit logging, RBAC enforced at the catalog/query layer matching vertical/account boundaries, ontology change management (versioning the ontology itself, since it's a shared contract every downstream phase depends on).
 
 Cloud Workbench and Governed Automation add their own phase-specific observability (eval gates, action audit logs) on top of this shared baseline rather than duplicating it.
@@ -248,6 +256,8 @@ Cloud Workbench and Governed Automation add their own phase-specific observabili
 ## 6. Glossary
 
 **Conformance / conformed schema** — Normalizing structurally different source data into one consistent schema.
+
+**Datadog** — the organization's existing observability platform (APM, infrastructure monitoring, log management, dashboards, monitors/alerting); used here as the platform-wide backend for metrics, tracing, and alerting rather than standing up a separate open-source stack (Prometheus/Grafana). Fed by OpenTelemetry-instrumented tracing spans. See §4.5.
 
 **dbt** — A SQL-based transformation tool (with built-in testing and documentation) used here to implement most of the bronze-to-silver mediation transform as Snowflake queries.
 
