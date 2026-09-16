@@ -168,6 +168,14 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 
 ## 5. AI Consumption Layer (Cloud Workbench, Phase 5)
 
+**Cache: Redis** (Cloud Workbench ADR-003) — keyed on resolved query parameters (vertical, account, time range), values are reranked retrieval context, not the final generated answer.
+
+| Component | Name | Purpose |
+|---|---|---|
+| Cache instance | `redis-cloud-workbench-cache` | Self-hosted on AKS, alongside the platform's other AKS-hosted services |
+| Key shape | `ctx:{vertical_id}:{account_id}:{time_range}:{query_shape_hash}` | Resolved parameters only, never the raw natural-language question |
+| TTL | Short enough to bound staleness against Data Foundations' refresh cadence, no explicit invalidation path modeled yet | See Cloud Workbench ADR-003's consequences |
+
 **Vector store: Postgres + pgvector** (Cloud Workbench ADR-006), separate from both Snowflake and the Neo4j graph store.
 
 | Component | Name | Purpose |
@@ -181,9 +189,9 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 
 | Tool name | Signature (spec) | Purpose |
 |---|---|---|
-| `get_cost_by_account` | `(account_id: str, period: DateRange) -> CostSummary` | Structured query against `gold.fact_cost_daily`. **Internal persona only** — not in the External tool set (Cloud Workbench ADR-007) |
+| `get_cost_by_account` | `(account_id: str, period: DateRange) -> CostSummary` | Structured query against `gold.fact_cost_daily`, RBAC-scoped to the requestor's own vertical(s) regardless of persona — the core "why is this thing so expensive" lookup, available to both personas |
 | `get_anomalies` | `(vertical_id: str, period: DateRange, min_severity: str) -> List[Anomaly]` | Query `gold.fact_anomaly`, RBAC-scoped to the requestor's own vertical(s) regardless of persona |
-| `get_peer_benchmark` | `(metric_name: str, vertical_id: str) -> BenchmarkResult` | Returns `metric_peer_percentile_rank` (Data Foundations §4.4) for a rate-based metric only — the External persona's cross-vertical comparison tool, never raw peer figures |
+| `get_peer_benchmark` | `(metric_name: str, vertical_id: str) -> BenchmarkResult` | Returns `metric_peer_percentile_rank` (Data Foundations §4.4) for a rate-based metric only. **Internal persona only** — not in the External tool set (Cloud Workbench ADR-007) |
 | `query_graph` | `(query: GraphQuery) -> GraphResult` | Executes a scoped Cypher graph traversal against Neo4j (Section 4) |
 | `search_semantic_docs` | `(query: str, top_k: int) -> List[Chunk]` | Hybrid dense (pgvector) + sparse (Postgres full-text) search over `docs.semantic_doc_chunks` (Cloud Workbench ADR-006), both candidate sets passed to `node_rerank` |
 
@@ -192,26 +200,42 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 | Persona | Tools available |
 |---|---|
 | Internal (FinOps/platform team) | All tools in this section, unrestricted by persona (still RBAC-scoped by vertical/account where applicable) |
-| External (a business vertical) | `get_anomalies`, `get_peer_benchmark`, `query_graph`, `search_semantic_docs` — **not** `get_cost_by_account` (a raw multi-vertical query shape); cross-vertical comparison is only available via `get_peer_benchmark`'s rate-based metrics |
+| External (a business vertical) | `get_cost_by_account`, `get_anomalies`, `query_graph`, `search_semantic_docs` — **not** `get_peer_benchmark` (cross-vertical comparison, an enrichment beyond explaining one's own bill, Internal-only for now) and **not** `propose_action` (Section 6) |
 
-**LangGraph nodes** (workflow steps, state machine):
+**pydantic-graph nodes** (workflow steps, state machine):
 
 | Node | Name | Function |
 |---|---|---|
 | Resolve persona | `node_resolve_persona` | First node in the graph. Resolves Internal/External from auth context, binds the persona-scoped tool set (above) and system-prompt variant for the rest of the request (Cloud Workbench ADR-007) |
-| Query rewrite | `node_query_rewrite` | Resolves conversational references, disambiguates the raw query |
-| Route retrieval | `node_route_retrieval` | Decides structured/graph/vector path(s) based on query shape, from the tool set `node_resolve_persona` bound |
+| Query rewrite | `node_query_rewrite` | Resolves conversational references, then grounds the query — metric references against Semantic Views, entity references against `resolve_resource_identity()`, relative time expressions against a concrete `DateRange` — rather than passing free text downstream (Cloud Workbench ADR-008) |
+| Check cache | `node_check_cache` | Looks up `node_query_rewrite`'s resolved parameters in Redis (Cloud Workbench ADR-003); on hit, skips straight to `node_generate` |
+| Route retrieval | `node_route_retrieval` | Cache miss only. Decides structured/graph/vector path(s) based on query shape, from the tool set `node_resolve_persona` bound |
 | Retrieve structured | `node_retrieve_structured` | Calls `get_cost_by_account` / `get_anomalies` |
 | Retrieve graph | `node_retrieve_graph` | Calls `query_graph` for relational questions |
 | Retrieve vector | `node_retrieve_vector` | Calls `search_semantic_docs` for definitional questions |
 | Rerank | `node_rerank` | Cross-encoder rerank across the combined dense + sparse candidates from `search_semantic_docs` (see Cloud Workbench ADR-001) |
-| Generate | `node_generate` | LLM call with assembled context |
+| Populate cache | `node_populate_cache` | Writes the reranked context to Redis under `node_query_rewrite`'s resolved-parameter key (Cloud Workbench ADR-003) |
+| Generate | `node_generate` | LLM call with assembled context (from cache or from `node_populate_cache`) |
 | Grounding check | `node_grounding_check` | Runs `check_faithfulness()` before allowing the response through |
 | Format citations | `node_format_citations` | Attaches human-readable source references |
 | Route to action | `node_route_action` (conditional edge) | If the query implies an action, calls `propose_action` (Section 6) — the only action-layer tool exposed to this agent; it never calls `idp_provision_request`/`cmp_container_action` directly |
 
 **Function signatures (specification)**:
 ```
+rewrite_query(raw_query: str, conversation_context: ConversationContext, persona: Persona) -> ResolvedQuery  [node_query_rewrite]
+  Purpose: Resolve conversational references, then ground the query against
+  sources this platform already governs — not left to retrieval or generation
+  to interpret independently (Cloud Workbench ADR-008).
+  Output: ResolvedQuery {
+    disambiguated_text: str,
+    canonical_metrics: List[str]       # Semantic View metric names (Section 4)
+    resolved_entities: List[EntityRef] # vertical_id / APM ID via resolve_resource_identity() (Section 4)
+    resolved_time_range: DateRange,
+  }
+  On unresolvable entity or metric reference: pass the unresolved term through
+  to node_route_retrieval flagged as ungrounded, rather than failing the
+  request outright — the vector/documentation retrieval leg may still answer it.
+
 check_faithfulness(answer: str, retrieved_context: List[Chunk]) -> FaithfulnessResult
   Purpose: Verify each claim in the answer is supported by retrieved context.
   Output: pass/fail plus list of unsupported claims, if any.
@@ -326,6 +350,7 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 | `modules/graph-store` | Reusable | The Neo4j instance backing the knowledge graph (Section 4, Data Foundations ADR-004) |
 | `modules/postgres` | Reusable | A Postgres instance provisioning two logical databases: the pgvector-enabled documentation index (Section 5, Cloud Workbench ADR-006) and the action-approval/workflow operational state (Section 6, Governed Automation ADR-003) |
 | `modules/temporal-cluster` | Reusable | The Temporal cluster orchestrating Governed Automation's proposed-action workflows (Section 6, Governed Automation ADR-002) |
+| `modules/redis-cache` | Reusable | The Redis instance backing Cloud Workbench's retrieval-context cache (Section 5, Cloud Workbench ADR-003) |
 
 **Kubernetes namespaces**: `ns-cloud-workbench-prod`, `ns-cloud-workbench-staging`, `ns-mlops-prod`, one namespace per environment/domain for RBAC and resource-quota isolation.
 
@@ -335,7 +360,7 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 |---|---|---|
 | API service | `chart-cost-intelligence-api` | `cost-intelligence-api` service |
 | MCP server | `chart-mcp-cost-server` | The MCP tool server exposing Section 5/6 tools |
-| Workbench orchestrator | `chart-cloud-workbench-orchestrator` | The LangGraph-based orchestration service |
+| Workbench orchestrator | `chart-cloud-workbench-orchestrator` | The pydantic-graph-based orchestration service |
 
 **CI/CD pipeline**: `pipeline-cloud-workbench-ci`, stages: `test` (unit/integration) → `eval-gate` (runs `eval_set_cost_queries.yaml` against any prompt/retrieval/model change) → `deploy-staging` → `canary-prod` (10/50/100 traffic increments per the staged-rollout pattern).
 
@@ -351,7 +376,7 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 
 Governed Automation's action-level audit trail is separate: Temporal's own workflow history captures every state transition for a proposed action as it happens, and `gold.fact_action_audit` (Section 6) is the queryable, reportable copy synced once a workflow completes — this table logs the query/generation side of Cloud Workbench, not action execution.
 
-**Tracing**: OpenTelemetry instrumentation across every node in Section 5's LangGraph workflow and every Section 6 action call, span attributes include `request_id`, `vertical_id`, `node_name`, `duration_ms`.
+**Tracing**: OpenTelemetry instrumentation across every node in Section 5's pydantic-graph workflow and every Section 6 action call, span attributes include `request_id`, `vertical_id`, `node_name`, `duration_ms`.
 
 **Eval gate artifact**: `eval_set_cost_queries.yaml`, a curated set of representative queries with expected answer characteristics (not exact strings, expected supporting facts), run by CI job `job_run_eval_gate` on every prompt/retrieval/model change.
 
@@ -366,4 +391,4 @@ Governed Automation's action-level audit trail is separate: Temporal's own workf
 
 ## 10. What This Specification Deliberately Omits
 
-Per the framing of this artifact: no SQL DDL, no dbt model SQL or Snowpark Python implementation code, no actual Terraform HCL, no LangGraph Python graph definitions. An implementing engineer would write all of that against this specification, table names, column lists, function signatures, and policy names given here should be sufficient to build consistently without inventing the structure from scratch.
+Per the framing of this artifact: no SQL DDL, no dbt model SQL or Snowpark Python implementation code, no actual Terraform HCL, no pydantic-graph Python node/edge definitions. An implementing engineer would write all of that against this specification, table names, column lists, function signatures, and policy names given here should be sufficient to build consistently without inventing the structure from scratch.

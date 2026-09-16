@@ -47,36 +47,150 @@ Business verticals routinely ask the FinOps team to explain their own bill — "
 - **Not opening action-taking or proactive delivery to verticals.** External sessions are reactive, read-only Q&A about their own data — no `propose_action`, no unsolicited findings, no cross-vertical benchmarking (§2.2 FR4/FR5, §4.1). This is a deliberate, standing product boundary: verticals get self-serve *answers*, not self-serve *action-taking*, even though the underlying automation (Governed Automation) is already mature by this phase.
 - **Not generating visualizations/charts.** The agent's output is text, citations, and structured data (tables, numbers) — not rendered charts or a chart specification. Explicitly deferred, not designed here: covering this would mean deciding whether the agent emits a declarative chart spec for client-side rendering, or defers entirely to the existing Power BI path (Data Foundations §4.3), and neither is settled. Anything beyond a simple inline number/table today points the user at the relevant Power BI report.
 - **Not replacing Self-Serve Foundations' API.** Programmatic, non-conversational access to cost/anomaly/recommendation data is already served by the Phase 2 REST API (`Solution_Architecture_Self_Serve_Foundations.md` §4.1); this document adds a conversational surface on top of the same underlying data, not a second API.
+- **Not carrying cross-turn conversation memory.** Each request resolves persona and query parameters fresh (§3.4's state object has no `conversation_history` field) — a follow-up question doesn't inherit context from an earlier one in the same session. Explicitly deferred, not designed here: multi-turn memory would need a decision on where session state lives (Redis, given it's already in the stack per §3.1, is the likely candidate) and how long it persists, neither settled.
 
 ---
 
 ## 3. Architecture Overview
 
+### 3.1 Component architecture (the harness)
+
+Every piece the orchestrator actually depends on to answer a query — not just the model call.
+
 ```mermaid
-flowchart TD
-    D[Semantic layer and graph<br/>from Data Foundations] --> E[Cloud Workbench<br/>RAG + agentic orchestration]
-    E --> F[Proposed action<br/>to Governed Automation]
+flowchart LR
+    U["User<br/>Internal or External"] --> ORCH
+
+    subgraph ORCH["Orchestrator (pydantic-graph)"]
+        direction TB
+        PERSONA["Persona gate<br/>node_resolve_persona"]
+        GEN["Generation<br/>node_generate"]
+        GUARD["Grounding check<br/>node_grounding_check"]
+        PERSONA -.-> GEN
+        GEN -.-> GUARD
+    end
+
+    ORCH <-->|check / populate,<br/>resolved-param keyed| CACHE["Cache<br/>Redis"]
+
+    ORCH -->|tool calls| MCP["MCP Server<br/>chart-mcp-cost-server"]
+
+    MCP --> SF["Cortex Analyst<br/>Snowflake gold + semantic layer"]
+    MCP --> N4["Neo4j<br/>knowledge graph"]
+    MCP --> PG["Postgres<br/>pgvector + full-text"]
+    MCP -->|Internal persona only| ACT["propose_action<br/>Governed Automation"]
+
+    ORCH -->|generation, embeddings| LLM["Azure OpenAI<br/>chat model + text-embedding-3-small"]
+
+    ORCH --> RESP["Cited response,<br/>or abstain"]
+    RESP --> U
 ```
+
+The persona gate, grounding check, and the Internal-only path to `propose_action` are this diagram's guardrails — dotted lines inside the orchestrator box mark where the node flow *passes through* them, not where the real branching logic lives; §3.2 has the actual decision points. Redis is new here relative to §4.1's prose: ADR-003 already decided to cache at the resolved-parameter level, but never named a technology — see ADR-003 for why Redis, not Postgres, hosts it.
+
+### 3.2 Orchestrator state flow (pydantic-graph nodes)
+
+The actual decision points inside the orchestrator box above — this is what a plain component diagram can't show.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ResolvePersona
+    ResolvePersona --> QueryRewrite
+    QueryRewrite --> CheckCache: resolved params (ADR-003)
+    CheckCache --> Generate: cache hit
+    CheckCache --> RouteRetrieval: cache miss
+    RouteRetrieval --> RetrieveStructured: numeric/aggregation
+    RouteRetrieval --> RetrieveGraph: relational
+    RouteRetrieval --> RetrieveVector: definitional
+    RetrieveStructured --> Rerank
+    RetrieveGraph --> Rerank
+    RetrieveVector --> Rerank
+    Rerank --> PopulateCache
+    PopulateCache --> Generate
+    Generate --> GroundingCheck
+    GroundingCheck --> FormatCitations: pass
+    GroundingCheck --> Generate: fail, retry once\n(stricter prompt)
+    GroundingCheck --> Abstain: fail twice
+    FormatCitations --> RouteToAction
+    RouteToAction --> ProposeAction: action warranted,\nInternal persona only
+    RouteToAction --> [*]: no action, or\nExternal persona
+    ProposeAction --> [*]
+    Abstain --> [*]
+```
+
+Two things worth naming explicitly since the diagram compresses them: the retry-on-grounding-failure loop is bounded (one retry, then abstain — never an unbounded loop), and `RouteToAction` is where FR4's persona gate actually lives in the node graph, not a separate check bolted on afterward.
+
+### 3.3 Representative request sequence
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant CW as Cloud Workbench
-    participant R as Retrieval
-    participant G as Generation
+    participant CW as Orchestrator
+    participant CACHE as Cache (Redis)
+    participant MCP as MCP Server
+    participant SF as Cortex Analyst
+    participant N4 as Neo4j
+    participant PG as Postgres
+    participant LLM as Azure OpenAI
     participant A as Governed Automation
 
     U->>CW: Natural language query
-    CW->>R: Rewritten query, MCP orchestration
-    R->>CW: Retrieved context, semantic/graph/vector
-    CW->>G: Context plus query
-    G->>G: Grounding check, citations
-    G-->>U: Response with citations
-    opt Action warranted
-        CW->>A: Proposed action, tool call
-        A-->>CW: Action result or approval pending
+    CW->>CW: resolve persona, bind tool set
+    CW->>CW: rewrite query, resolve params
+    CW->>CACHE: check(resolved params)
+    alt cache hit
+        CACHE-->>CW: cached context
+    else cache miss
+        CW->>MCP: route retrieval (fan out)
+        par
+            MCP->>SF: structured query
+            SF-->>MCP: rows
+        and
+            MCP->>N4: graph traversal
+            N4-->>MCP: subgraph
+        and
+            MCP->>PG: hybrid dense+sparse search
+            PG-->>MCP: candidates
+        end
+        MCP-->>CW: combined context
+        CW->>CW: rerank
+        CW->>CACHE: populate(resolved params, context)
+    end
+    CW->>LLM: generate(context, query)
+    LLM-->>CW: draft answer
+    CW->>CW: grounding check
+    alt faithfulness fails
+        CW->>LLM: retry once, stricter prompt
+        LLM-->>CW: draft answer 2
+        CW->>CW: grounding check (2nd pass)
+    end
+    alt still fails
+        CW-->>U: abstain — "not enough information"
+    else passes
+        CW->>CW: format citations
+        opt action warranted, Internal persona
+            CW->>A: propose_action(...)
+            A-->>CW: queued / executed / denied
+        end
+        CW-->>U: response with citations (+ proposal outcome, if any)
     end
 ```
+
+This is what actually justifies §3.1's cache box: without it, every repeat question from the same vertical about the same time range re-hits all three retrieval systems and re-generates, for no reason.
+
+### 3.4 State object threaded through the graph
+
+Not previously specified — the fields pydantic-graph actually carries node-to-node for one request:
+
+| Field | Set by | Used by |
+|---|---|---|
+| `persona`, `tool_set`, `prompt_variant` | `ResolvePersona` | Every downstream node — gates which MCP tools are callable and which system-prompt variant `Generate` uses |
+| `resolved_params` (vertical, account, time range) | `QueryRewrite` — grounded against the ontology's entity resolution (ADR-008) | `CheckCache` / `PopulateCache` (the cache key), `RouteRetrieval` |
+| `canonical_metrics` (Semantic View metric names referenced by the query) | `QueryRewrite` — grounded against Data Foundations' Semantic Views (ADR-008) | `RouteRetrieval` (structured/graph paths), `Generate` |
+| `retrieved_context` (per source: structured/graph/vector) | `RetrieveStructured`/`RetrieveGraph`/`RetrieveVector`, or `CheckCache` on a hit | `Rerank`, `Generate` |
+| `grounding_attempts` (int, starts at 0) | `GroundingCheck` | Bounds the retry loop in §3.2 — incremented on each failure, forces `Abstain` once it exceeds 1 |
+| `citations` | `FormatCitations` | Final response payload |
+
+No cross-turn conversation memory is carried in this state object — see §2.4's non-goal on this.
 
 ---
 
@@ -89,8 +203,14 @@ sequenceDiagram
   - **Internal** gets everything External has, unrestricted by persona, plus `propose_action`, `get_peer_benchmark`, and FR5's proactive surfacing.
 
   See ADR-007 for why this is enforced as a distinct orchestration step rather than a prompt instruction alone.
+- **Query understanding & grounding (`node_query_rewrite`)**: resolves conversational references (coreference — "it," "that instance") and, more importantly, *grounds* the query against the same governed sources everything else in this platform reads from, rather than passing raw or loosely-rewritten text to retrieval:
+  - **Metric canonicalization** — "our EC2 bill" resolves to `metric_ec2_spend` (Data Foundations §4.4's Semantic Views), not a free-text phrase Cortex Analyst has to interpret on its own. This is the same "one governed definition, reused" discipline applied to BI (Data Foundations ADR-002) and the knowledge graph (ADR-004), extended to the first node in this pipeline — the node most upstream of everything else, and so the one place a silent divergence would be hardest to catch downstream.
+  - **Entity resolution** — "this vertical," "the payment service" resolve to an actual `vertical_id` or APM ID using Data Foundations' existing entity-resolution logic (`resolve_resource_identity()`, §4.4), not a second, independent guess at identity living inside this node.
+  - **Time-range resolution** — relative expressions ("last month," "this quarter") resolve to a concrete `DateRange`. This one is load-bearing twice over: it feeds the structured query *and* it's the freshness-determining part of the cache key (§3.4) — a wrong resolution here doesn't just retrieve the wrong window, it caches the wrong window under a key that looks correct.
+
+  See ADR-008 for why this grounding happens here rather than being left to Cortex Analyst's or the retrieval layer's own judgment.
 - **Retrieval**: hybrid — dense (vector/embedding) search via **Postgres with the pgvector extension**, combined with sparse (keyword/BM25-equivalent) search via Postgres's native full-text search (`tsvector`/GIN index), merged by the cross-encoder rerank step below — deliberately not Snowflake for this leg, see ADR-006; graph traversal over the knowledge graph (Neo4j, per Data Foundations ADR-004) for relational questions; and direct structured query — via **Snowflake Cortex Analyst** for natural-language-to-SQL, exposed as an MCP tool alongside hand-written queries for cases Cortex Analyst doesn't cover well — against gold-layer tables for precise numeric aggregation.
-- **Orchestration**: **LangGraph**-style explicit state machine, not a looser framework, chosen for the debuggability and audit-trail requirements this domain demands (see ADR-002). **MCP** exposes the Data Foundations query tools, the graph traversal tool, and the Governed Automation action-proposal tools to the agent in a standardized, discoverable way.
+- **Orchestration**: **pydantic-graph** explicit state machine — typed dataclass nodes and edges, not a looser framework — chosen for the debuggability and audit-trail requirements this domain demands (see ADR-002). **MCP** exposes the Data Foundations query tools, the graph traversal tool, and the Governed Automation action-proposal tools to the agent in a standardized, discoverable way.
 - **Generation & guardrails**: grounding/faithfulness check before any answer reaches a user, citations back to the specific gold-table rows or graph nodes that support each claim, confidence-threshold abstention when retrieval is weak. Model provider: Azure OpenAI (see ADR-004); embedding model: **Azure OpenAI `text-embedding-3-small`**, kept on the same provider as generation to avoid a second vendor integration for no material benefit. Chosen over `text-embedding-3-large` as the default — this indexes a bounded, internal documentation corpus (semantic layer definitions, not open-web scale), and the hybrid design's sparse leg (see above) already covers dense embeddings' weak spot on exact-match terms — with the eval set (§4.2) as the gate that would justify upgrading to `-large` if retrieval quality actually falls short in practice.
 
 ### 4.2 Observability, evaluation, and governance (specific to this phase)
@@ -116,23 +236,23 @@ The full model-governance treatment — impact-assessment screening, human overs
 - *Alternatives considered*: Vector-only retrieval for the documentation leg, rejected — a purely dense approach reliably underperforms on exact-match/rare-term queries this domain will see often, and the existing rerank node is already positioned to merge more than one candidate set with no new orchestration node required. A separate keyword-only search tool exposed to the agent, rejected as unnecessary complexity — hybrid search is implemented inside `search_semantic_docs` (Build Specification §5) rather than adding a tool the agent has to learn to choose between.
 - *Consequences*: Slightly more retrieval-side implementation complexity (two indexes — dense and sparse — feeding one reranker) but no new orchestration nodes or agent-facing complexity, and materially better recall on exact-match queries, especially once free-text sources like ITSM ticket history (a plausible future reference data source per `FinOps Opportunities.md`) get indexed.
 
-**ADR-002: Use LangGraph-style explicit orchestration rather than a higher-level agent framework (e.g., CrewAI)**
-- *Context*: This domain requires debuggable, auditable agent behavior, especially where action proposals reach Governed Automation.
-- *Decision*: Model the agent's workflow as an explicit graph (state, nodes, edges) rather than a more autonomous, less traceable framework.
-- *Alternatives considered*: CrewAI-style role-based orchestration, rejected for this specific system — faster to prototype but harder to audit and debug in production, better suited to less regulated use cases.
-- *Consequences*: More upfront design work per workflow, but every decision path is traceable for audit and troubleshooting.
+**ADR-002: Use pydantic-graph for explicit orchestration rather than LangGraph or a higher-level agent framework (e.g., CrewAI)**
+- *Context*: This domain requires debuggable, auditable agent behavior, especially where action proposals reach Governed Automation — ruling out a looser, more autonomous framework. Between the explicit-graph options, LangGraph is the more established choice, but this design already bypasses LangChain's own abstractions everywhere it could use them (tools via MCP, not LangChain tool wrappers; retrieval via Cortex Analyst/pgvector/Neo4j directly, not LangChain retrievers) — LangGraph's main practical benefit, deep LangChain ecosystem integration, isn't actually used here. The rest of the stack also leans on typed, Pydantic-style contracts throughout (MCP tool signatures, the FastAPI-style API layer), and this workflow doesn't need LangGraph's built-in checkpointing/persistence: `propose_action` returns synchronously, and Governed Automation's later outcome reaches the user through a separate notification path, not a resumed chat session.
+- *Decision*: Model the agent's workflow as an explicit graph (state, nodes, edges) using **pydantic-graph** — typed dataclass nodes and edges, consistent with the typing discipline used everywhere else in this stack — rather than LangGraph or a more autonomous framework.
+- *Alternatives considered*: CrewAI-style role-based orchestration, rejected for this specific system — faster to prototype but harder to audit and debug in production, better suited to less regulated use cases. LangGraph, rejected as the default despite being the more established choice — its main value isn't used here, it pulls in LangChain as a dependency for a graph-executor need that's really just typed nodes and conditional routing, and its built-in checkpointing solves a persistence problem this workflow doesn't have.
+- *Consequences*: More upfront design work per workflow, but every decision path is traceable for audit and troubleshooting. A lighter dependency footprint and better stylistic consistency with the rest of the platform's typed contracts than LangGraph would have given, at the cost of a less mature ecosystem — fewer pre-built integrations, smaller community, no inherited persistence layer if a future requirement (e.g., resuming a paused conversation across an async action outcome) ever needs one; that would have to be hand-built on Postgres (already in the stack) rather than inherited for free.
 
-**ADR-003: Cache at the resolved-query-parameter level, not the raw question text**
-- *Context*: The platform is horizontal, serving multiple verticals with structurally similar but data-scoped-differently questions.
-- *Decision*: Cache keys include resolved parameters (vertical, account, time range), never the raw natural-language question alone.
-- *Alternatives considered*: Cache on raw query text for simplicity, rejected — risks a cache hit serving one vertical's data to another.
-- *Consequences*: Slightly more complex caching logic, eliminates a real cross-tenant data leakage risk.
+**ADR-003: Cache in Redis, keyed at the resolved-query-parameter level, not the raw question text**
+- *Context*: The platform is horizontal, serving multiple verticals with structurally similar but data-scoped-differently questions — the same retrieval fan-out (structured + graph + vector, §3.1) run repeatedly for near-identical requests is wasted latency and cost. An earlier version of this document decided the cache-key shape but never named a technology.
+- *Decision*: Redis (self-hosted on AKS, alongside the platform's other AKS-hosted services) as the cache store. Cache keys include resolved parameters (vertical, account, time range), never the raw natural-language question alone; values are the reranked retrieval context (§3.2's `PopulateCache` step), not the final generated answer, so a change in generation prompt/model doesn't require a cache flush.
+- *Alternatives considered*: Cache on raw query text for simplicity, rejected — risks a cache hit serving one vertical's data to another. Cache the final generated answer rather than retrieval context, rejected — couples cache validity to the generation step, invalidating on every prompt/model change instead of only when underlying data changes. Postgres for the cache (already in the stack, §4.1) instead of a separate technology, rejected — caching is a different access pattern (short-lived, high-churn key-value) than the durable relational data Postgres already holds here (the vector store); Redis is a purpose-built, standard fit, not a new category of complexity for this stack.
+- *Consequences*: One more piece of infrastructure to operate, sized and TTL'd separately from the vector store. A cache invalidation path is now needed when the semantic layer or gold tables refresh (Data Foundations' refresh cadence) — a stale cache entry outliving the data it was computed from is a real risk this ADR doesn't fully close, worth a TTL short enough to bound it rather than relying on explicit invalidation alone.
 
 **ADR-004: Use Azure OpenAI as the primary LLM provider**
 - *Context*: The JD lists four viable LLM APIs (Azure OpenAI, OpenAI, Google Gemini, AWS Bedrock) and two agentic frameworks (LangChain, AutoGen) as tooling the organization evaluates.
 - *Decision*: Azure OpenAI as the primary generation and embedding provider — the same underlying models as the direct OpenAI API, but under the organization's own tenant/network boundary and enterprise data-handling terms (no training on customer data by default, private networking), which matters more here than model choice alone given the query surface touches cost/usage data across every vertical.
 - *Alternatives considered*: Direct OpenAI API, rejected — no material capability gain over Azure OpenAI for this workload, at the cost of the enterprise networking/data-handling boundary. AWS Bedrock and GCP Vertex (Gemini), rejected as *primary*, not on model quality but on the inferred (unconfirmed) assumption that the organization's identity and networking are Azure-anchored, consistent with the rest of this platform's Azure-leaning inferences — worth confirming directly, since a wrong assumption here is a config change, not a redesign, given the orchestration layer stays provider-agnostic (see below).
-- *Consequences*: Some vendor lock-in to Azure OpenAI's model family and regional availability; bounded by keeping orchestration (LangGraph/MCP) provider-agnostic, so swapping the underlying model is a configuration change rather than an architecture change.
+- *Consequences*: Some vendor lock-in to Azure OpenAI's model family and regional availability; bounded by keeping orchestration (pydantic-graph/MCP) provider-agnostic, so swapping the underlying model is a configuration change rather than an architecture change.
 
 **ADR-005: Generate structured queries via Snowflake Cortex Analyst rather than hand-rolled text-to-SQL**
 - *Context*: ADR-001 already decided this system needs structured query generation for precise numeric aggregation against gold-layer tables. Data Foundations consolidated storage onto Snowflake, and Snowflake's native Cortex Analyst does natural-language-to-SQL grounded in a defined semantic model (the Data Foundations Semantic Views, §4.4).
@@ -148,9 +268,15 @@ The full model-governance treatment — impact-assessment screening, human overs
 
 **ADR-007: Resolve persona and scope the MCP tool set in the orchestration graph, not via a prompt instruction**
 - *Context*: `FinOps Opportunities.md` §2b defines two personas, and this document deliberately narrows what External can do beyond data segregation alone: it's not just "External sees less data," it's "External cannot call certain tools at all" — `propose_action` (action-taking, FR4), `get_peer_benchmark` (cross-vertical comparison), and proactive surfacing (FR5) are withheld entirely for this persona, not merely row-filtered. Row access policies (Data Foundations §4.3) already handle data segregation within a tool call (which rows a query returns); they say nothing about which tools are callable in the first place.
-- *Decision*: Add `node_resolve_persona` as the first step in the LangGraph workflow, resolving persona from auth context and binding a persona-specific MCP tool set and system-prompt variant for the rest of that request — enforced in the orchestration graph, the same place every other guardrail in this document set lives (ADR-001's retrieval routing, Governed Automation ADR-001's risk classification), not left to the model to infer from a prompt and decide whether to comply.
+- *Decision*: Add `node_resolve_persona` as the first step in the pydantic-graph workflow, resolving persona from auth context and binding a persona-specific MCP tool set and system-prompt variant for the rest of that request — enforced in the orchestration graph, the same place every other guardrail in this document set lives (ADR-001's retrieval routing, Governed Automation ADR-001's risk classification), not left to the model to infer from a prompt and decide whether to comply.
 - *Alternatives considered*: A prompt-only distinction (tell the model which persona it's serving, same tools and data available either way), rejected — this asks the model's own judgment to be the enforcement mechanism for a capability boundary, the exact pattern this document set rejects everywhere else (this document's ADR-001, Governed Automation ADR-001). Relying on row access policy alone without tool-set scoping, rejected as incomplete — RLS restricts row-level data within a tool call, but doesn't stop an External request from calling `propose_action` or `get_peer_benchmark` at all if those tools existed in its tool set without their own persona check.
 - *Consequences*: One more node and one more piece of request-scoped state (the resolved persona) threaded through the workflow, in exchange for a capability boundary that's enforced the same way as every other guardrail in this platform rather than being the one place prompt compliance is trusted.
+
+**ADR-008: Ground query rewriting against the semantic layer's metric vocabulary and the ontology's entity resolution, rather than passing free text to retrieval**
+- *Context*: `node_query_rewrite` is the first substantive node after persona resolution — every downstream node (retrieval, the cache, generation) inherits whatever it produces. Left unspecified, "rewrite the query" could mean anything from light coreference resolution to nothing at all, and a naive implementation would pass user phrasing straight to Cortex Analyst and the retrieval layer, each interpreting terms like "EC2 bill" or "this vertical" independently.
+- *Decision*: `node_query_rewrite` grounds three things against sources this platform already governs, rather than deriving them itself: metric references against Data Foundations' Semantic Views (§4.4), entity references against the same entity-resolution logic the ontology uses (`resolve_resource_identity()`), and relative time expressions into a concrete `DateRange`. See §4.1 for what each grounding step resolves.
+- *Alternatives considered*: Leave rewriting to light text cleanup (coreference resolution only) and let Cortex Analyst's semantic-model grounding handle metric/entity interpretation on its own, rejected — Cortex Analyst grounds *SQL generation* against the semantic model, but the graph and vector retrieval legs have no equivalent grounding of their own, so an ungrounded rewrite would leave two of three retrieval paths interpreting the same terms independently, with no guarantee they'd resolve to the same entity or metric. Have each retrieval path (structured/graph/vector) do its own grounding independently, rejected — recreates the same "same term, computed three different ways" risk this document set has closed everywhere else (BI, the knowledge graph, §4.1's ML features), just moved one node earlier.
+- *Consequences*: `node_query_rewrite` becomes a heavier node — it calls the semantic layer and entity-resolution logic before retrieval even starts, adding latency to every request, not just ones that need it. Accepted because a wrong or ungrounded resolution here is wrong for the entire request, not recoverable by a later node, and the alternative (three independent interpretations) is a worse failure mode than added latency.
 
 ---
 
@@ -163,3 +289,7 @@ The full model-governance treatment — impact-assessment screening, human overs
 **MCP** — The tool-calling protocol exposing Data Foundations' query tools and Governed Automation's action-proposal tools to the Cloud Workbench agent in a standardized, discoverable way.
 
 **pgvector** — A Postgres extension adding vector similarity search; hosts the dense-retrieval leg of this document's hybrid search (ADR-006), alongside Postgres's native full-text search for the sparse leg.
+
+**pydantic-graph** — A typed, dataclass-based graph/state-machine library from the Pydantic team; orchestrates this document's agent workflow as explicit nodes and edges (ADR-002), rather than LangGraph or a looser agent framework.
+
+**Redis** — An in-memory key-value store; hosts this document's retrieval-context cache (§3.1, ADR-003), keyed on resolved query parameters rather than raw question text.
