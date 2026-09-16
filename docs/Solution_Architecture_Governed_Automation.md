@@ -1,14 +1,14 @@
 # Solution Architecture: Governed Automation
 
-Phase 3 of the platform sequenced in `FinOps Solution Overview.md`. Split out from what was originally a single combined "Internal Assistant" solution architecture document — see `Solution_Architecture_Data_Foundations.md` for why it was split.
+Phase 3 of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md). Split out from what was originally a single combined "Internal Assistant" solution architecture document — see [Solution_Architecture_Data_Foundations.md](Solution_Architecture_Data_Foundations.md) for why it was split.
 
-Requirements, org details, and specific tool choices below are **inferred** from JD language and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: `Platform_Build_Specification.md` §6.
+Requirements, org details, and specific tool choices below are **inferred** from JD language and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §6.
 
 ---
 
 ## 1. Executive Summary
 
-This is the layer that decides what happens to an optimization action proposed by Core Intelligence (a rightsizing/anomaly finding) or, later, Cloud Workbench (a user-initiated request): execute it automatically, execute it with a delay and opt-out, or hold it for mandatory human approval — classified by risk, enforced in code, never left to the proposing system's own judgment. At this phase, Core Intelligence and the Self-Serve Foundations API (`propose_action`'s `origin: "core_intelligence"` and internal-team API calls) are this layer's only proposal sources — Cloud Workbench doesn't exist yet (it's Phase 5, sequenced *after* this layer, per `FinOps Solution Overview.md` ADR-M1) and becomes a third source once it ships, through the same `propose_action` entry point, no design change required here.
+This is the layer that decides what happens to an optimization action proposed by Core Intelligence (a rightsizing/anomaly finding) or, later, Cloud Workbench (a user-initiated request): execute it automatically, execute it with a delay and opt-out, or hold it for mandatory human approval — classified by risk, enforced in code, never left to the proposing system's own judgment. At this phase, Core Intelligence and the Self-Serve Foundations API (`propose_action`'s `origin: "core_intelligence"` and internal-team API calls) are this layer's only proposal sources — Cloud Workbench doesn't exist yet (it's Phase 5, sequenced *after* this layer, per [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md#master-level-architecture-decisions)'s ADR-M1) and becomes a third source once it ships, through the same `propose_action` entry point, no design change required here.
 
 ## 2. Business Context & Requirements
 
@@ -131,9 +131,9 @@ Educated assumptions carried over from `FinOps Opportunities.md`'s open items, s
 
 **ADR-003: Store approval-queue and workflow operational state in Postgres, sync finalized records to Snowflake gold for reporting**
 - *Context*: `action_approval_requests` and related workflow state are a transactional read-modify-write workload — create a request, list pending ones, record a decision, update status — the pattern an OLTP database is built for. Snowflake, used everywhere else in this platform (Data Foundations ADR-003), is an analytical/OLAP warehouse, not designed for this access pattern.
-- *Decision*: Keep operational workflow/approval state in Postgres (the same instance class already introduced for the vector store, Cloud Workbench ADR-006, though a separate logical database), and sync finalized action records into a `gold.fact_action_audit`-style Snowflake table once a workflow completes, for cross-platform reporting alongside every other fact table.
+- *Decision*: Keep operational workflow/approval state in Postgres — a standard, well-understood OLTP fit for this read-modify-write pattern — and sync finalized action records into a `gold.fact_action_audit`-style Snowflake table once a workflow completes, for cross-platform reporting alongside every other fact table.
 - *Alternatives considered*: Keep this state in Snowflake directly, rejected — forcing a high-frequency, low-latency, single-row read/write workload onto an analytical warehouse is a real cost-and-latency mismatch, not a hypothetical one.
-- *Consequences*: Two data stores instead of one for this layer, and a sync step to keep them consistent — accepted because it puts each workload on the store actually built for it, following the same "operational store plus a resynced analytical copy" pattern already established for Neo4j (Data Foundations ADR-004) and pgvector (Cloud Workbench ADR-006).
+- *Consequences*: Two data stores instead of one for this layer, and a sync step to keep them consistent — accepted because it puts each workload on the store actually built for it, following the same "operational store plus a resynced analytical copy" pattern already established for Neo4j (Data Foundations ADR-004).
 
 **ADR-004: Check IaC-managed status before direct execution; route Terraform-managed resources through the IaC pipeline instead of IDP/CMP**
 - *Context*: `execute_action` calling IDP/CMP directly changes live infrastructure outside of Terraform. If the target resource is Terraform-managed, that live change is invisible to the IaC pipeline — the next `terraform apply` either silently reverts it or conflicts with an unrelated change to the same module. Neither is acceptable for an automated action.

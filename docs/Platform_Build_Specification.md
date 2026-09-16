@@ -1,6 +1,6 @@
 # Detailed Build Specification: FinOps Intelligence Platform
 
-Companion to four solution architecture documents, each covering a phase from `FinOps Solution Overview.md`: `Solution_Architecture_Data_Foundations.md` (§1–4 below), `Solution_Architecture_Self_Serve_Foundations.md` — Phase 2's API/dashboards (§7), `Solution_Architecture_Governed_Automation.md` (§6), and `Solution_Architecture_Cloud_Workbench.md` — Phase 5's agentic interface (§5). §8–9 are cross-cutting infrastructure and observability shared across all four. Those documents establish the architecture and decisions; this one goes one level deeper, naming the actual components, schemas, interfaces, and policy artifacts precisely enough that a single IC could take this and build the full stack without having to invent structure themselves. **No implementation code is included by design**, this specifies what must exist and its contract, not how it's written. Names below are illustrative and consistent, not confirmed the organization naming conventions, adapt to actual org standards if this were real.
+Companion to four solution architecture documents, each covering a phase from [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md): [Solution_Architecture_Data_Foundations.md](Solution_Architecture_Data_Foundations.md) (§1–4 below), [Solution_Architecture_Self_Serve_Foundations.md](Solution_Architecture_Self_Serve_Foundations.md) — Phase 2's API/dashboards (§7), [Solution_Architecture_Governed_Automation.md](Solution_Architecture_Governed_Automation.md) (§6), and [Solution_Architecture_Cloud_Workbench.md](Solution_Architecture_Cloud_Workbench.md) — Phase 5's agentic interface (§5). §8–9 are cross-cutting infrastructure and observability shared across all four. Those documents establish the architecture and decisions; this one goes one level deeper, naming the actual components, schemas, interfaces, and policy artifacts precisely enough that a single IC could take this and build the full stack without having to invent structure themselves. **No implementation code is included by design**, this specifies what must exist and its contract, not how it's written. Names below are illustrative and consistent, not confirmed the organization naming conventions, adapt to actual org standards if this were real.
 
 ---
 
@@ -168,22 +168,15 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 
 ## 5. AI Consumption Layer (Cloud Workbench, Phase 5)
 
-**Cache: Redis** (Cloud Workbench ADR-003) — keyed on resolved query parameters (vertical, account, time range), values are reranked retrieval context, not the final generated answer.
+**Redis: retrieval cache + session memory** (Cloud Workbench ADR-003, ADR-009), two logically separate key spaces on one instance.
 
 | Component | Name | Purpose |
 |---|---|---|
 | Cache instance | `redis-cloud-workbench-cache` | Self-hosted on AKS, alongside the platform's other AKS-hosted services |
-| Key shape | `ctx:{vertical_id}:{account_id}:{time_range}:{query_shape_hash}` | Resolved parameters only, never the raw natural-language question |
-| TTL | Short enough to bound staleness against Data Foundations' refresh cadence, no explicit invalidation path modeled yet | See Cloud Workbench ADR-003's consequences |
+| Retrieval cache key | `ctx:{vertical_id}:{account_id}:{time_range}:{query_shape_hash}` | Resolved parameters only, never the raw natural-language question. TTL short enough to bound staleness against Data Foundations' refresh cadence |
+| Session memory key | `session:{session_id}` | Last few turns of the active conversation, TTL'd to session lifetime. Read at the start of `node_query_rewrite`, appended to after `node_format_citations` (Cloud Workbench ADR-009) |
 
-**Vector store: Postgres + pgvector** (Cloud Workbench ADR-006), separate from both Snowflake and the Neo4j graph store.
-
-| Component | Name | Purpose |
-|---|---|---|
-| Table | `docs.semantic_doc_chunks` | `chunk_id` (PK), `source_ref`, `content`, `embedding` (`vector` type, pgvector), `content_tsv` (`tsvector`, generated column for full-text search) |
-| Index | `idx_semantic_doc_chunks_embedding` | Approximate-nearest-neighbor index (e.g., HNSW) on `embedding`, for the dense-retrieval leg |
-| Index | `idx_semantic_doc_chunks_tsv` | GIN index on `content_tsv`, for the sparse/keyword-retrieval leg |
-| Sync job | `job_sync_semantic_docs_to_pgvector` | Reads semantic layer documentation (Data Foundations §4.4, Snowflake Semantic Views), (re-)computes embeddings via Azure OpenAI `text-embedding-3-small`, and upserts into `docs.semantic_doc_chunks` on documentation change |
+No vector store in this design — Postgres/pgvector was removed (Cloud Workbench ADR-006); definitional questions are answered via `get_metric_definition` below, a direct Snowflake lookup, not embedding-based search.
 
 **MCP server and exposed tools**:
 
@@ -193,31 +186,29 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 | `get_anomalies` | `(vertical_id: str, period: DateRange, min_severity: str) -> List[Anomaly]` | Query `gold.fact_anomaly`, RBAC-scoped to the requestor's own vertical(s) regardless of persona |
 | `get_peer_benchmark` | `(metric_name: str, vertical_id: str) -> BenchmarkResult` | Returns `metric_peer_percentile_rank` (Data Foundations §4.4) for a rate-based metric only. **Internal persona only** — not in the External tool set (Cloud Workbench ADR-007) |
 | `query_graph` | `(query: GraphQuery) -> GraphResult` | Executes a scoped Cypher graph traversal against Neo4j (Section 4) |
-| `search_semantic_docs` | `(query: str, top_k: int) -> List[Chunk]` | Hybrid dense (pgvector) + sparse (Postgres full-text) search over `docs.semantic_doc_chunks` (Cloud Workbench ADR-006), both candidate sets passed to `node_rerank` |
+| `get_metric_definition` | `(name_or_synonym: str) -> MetricDefinition` | Direct SQL/`SEARCH` lookup against Snowflake Semantic View metadata (Section 4) by name or synonym — no embedding, no vector index. Called both by `node_query_rewrite` (grounding, Cloud Workbench ADR-008) and directly for purely definitional questions |
 
 **Persona-to-tool-set mapping** (enforced by `node_resolve_persona`, below; Cloud Workbench ADR-007):
 
 | Persona | Tools available |
 |---|---|
 | Internal (FinOps/platform team) | All tools in this section, unrestricted by persona (still RBAC-scoped by vertical/account where applicable) |
-| External (a business vertical) | `get_cost_by_account`, `get_anomalies`, `query_graph`, `search_semantic_docs` — **not** `get_peer_benchmark` (cross-vertical comparison, an enrichment beyond explaining one's own bill, Internal-only for now) and **not** `propose_action` (Section 6) |
+| External (a business vertical) | `get_cost_by_account`, `get_anomalies`, `query_graph`, `get_metric_definition` — **not** `get_peer_benchmark` (cross-vertical comparison, an enrichment beyond explaining one's own bill, Internal-only for now) and **not** `propose_action` (Section 6) |
 
 **pydantic-graph nodes** (workflow steps, state machine):
 
 | Node | Name | Function |
 |---|---|---|
 | Resolve persona | `node_resolve_persona` | First node in the graph. Resolves Internal/External from auth context, binds the persona-scoped tool set (above) and system-prompt variant for the rest of the request (Cloud Workbench ADR-007) |
-| Query rewrite | `node_query_rewrite` | Resolves conversational references, then grounds the query — metric references against Semantic Views, entity references against `resolve_resource_identity()`, relative time expressions against a concrete `DateRange` — rather than passing free text downstream (Cloud Workbench ADR-008) |
-| Check cache | `node_check_cache` | Looks up `node_query_rewrite`'s resolved parameters in Redis (Cloud Workbench ADR-003); on hit, skips straight to `node_generate` |
-| Route retrieval | `node_route_retrieval` | Cache miss only. Decides structured/graph/vector path(s) based on query shape, from the tool set `node_resolve_persona` bound |
+| Query rewrite | `node_query_rewrite` | Loads session memory (Redis `session:{session_id}`) for coreference resolution, then grounds the query — metric references via `get_metric_definition`, entity references against `resolve_resource_identity()`, relative time expressions against a concrete `DateRange` — rather than passing free text downstream (Cloud Workbench ADR-008, ADR-009) |
+| Check cache | `node_check_cache` | Looks up `node_query_rewrite`'s resolved parameters in Redis's retrieval-cache key space (Cloud Workbench ADR-003); on hit, skips straight to `node_generate` |
+| Route retrieval | `node_route_retrieval` | Cache miss only. If the question is purely definitional, the definition is already resolved (`node_query_rewrite`) and this routes straight to `node_populate_cache`. Otherwise decides structured/graph path(s) based on query shape, from the tool set `node_resolve_persona` bound |
 | Retrieve structured | `node_retrieve_structured` | Calls `get_cost_by_account` / `get_anomalies` |
 | Retrieve graph | `node_retrieve_graph` | Calls `query_graph` for relational questions |
-| Retrieve vector | `node_retrieve_vector` | Calls `search_semantic_docs` for definitional questions |
-| Rerank | `node_rerank` | Cross-encoder rerank across the combined dense + sparse candidates from `search_semantic_docs` (see Cloud Workbench ADR-001) |
-| Populate cache | `node_populate_cache` | Writes the reranked context to Redis under `node_query_rewrite`'s resolved-parameter key (Cloud Workbench ADR-003) |
+| Populate cache | `node_populate_cache` | Writes the retrieved context to Redis under `node_query_rewrite`'s resolved-parameter key (Cloud Workbench ADR-003) |
 | Generate | `node_generate` | LLM call with assembled context (from cache or from `node_populate_cache`) |
 | Grounding check | `node_grounding_check` | Runs `check_faithfulness()` before allowing the response through |
-| Format citations | `node_format_citations` | Attaches human-readable source references |
+| Format citations | `node_format_citations` | Attaches human-readable source references, appends this turn to session memory (Redis `session:{session_id}`, Cloud Workbench ADR-009) |
 | Route to action | `node_route_action` (conditional edge) | If the query implies an action, calls `propose_action` (Section 6) — the only action-layer tool exposed to this agent; it never calls `idp_provision_request`/`cmp_container_action` directly |
 
 **Function signatures (specification)**:
@@ -234,7 +225,13 @@ rewrite_query(raw_query: str, conversation_context: ConversationContext, persona
   }
   On unresolvable entity or metric reference: pass the unresolved term through
   to node_route_retrieval flagged as ungrounded, rather than failing the
-  request outright — the vector/documentation retrieval leg may still answer it.
+  request outright.
+
+get_metric_definition(name_or_synonym: str) -> MetricDefinition
+  Purpose: Direct lookup against Snowflake Semantic View metadata by name or
+  synonym (Cloud Workbench ADR-001, ADR-006) — no embedding, no vector index.
+  Output: MetricDefinition { canonical_name, description, computed_from } or
+  not-found if no name/synonym match clears the fuzzy-match threshold.
 
 check_faithfulness(answer: str, retrieved_context: List[Chunk]) -> FaithfulnessResult
   Purpose: Verify each claim in the answer is supported by retrieved context.
@@ -348,9 +345,9 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 | `modules/storage-account` | Reusable | Raw/landing zone storage |
 | `modules/snowflake-platform` | Reusable | The Snowflake account objects hosting bronze/silver/gold (Sections 2–3): databases, schemas, virtual warehouses (sized separately for ingestion/transform vs. ML training vs. BI serving), roles, row access policies, and masking policies |
 | `modules/graph-store` | Reusable | The Neo4j instance backing the knowledge graph (Section 4, Data Foundations ADR-004) |
-| `modules/postgres` | Reusable | A Postgres instance provisioning two logical databases: the pgvector-enabled documentation index (Section 5, Cloud Workbench ADR-006) and the action-approval/workflow operational state (Section 6, Governed Automation ADR-003) |
+| `modules/postgres` | Reusable | A Postgres instance provisioning the action-approval/workflow operational state (Section 6, Governed Automation ADR-003). No longer shared with a documentation vector index — that use was removed, Cloud Workbench ADR-006 |
 | `modules/temporal-cluster` | Reusable | The Temporal cluster orchestrating Governed Automation's proposed-action workflows (Section 6, Governed Automation ADR-002) |
-| `modules/redis-cache` | Reusable | The Redis instance backing Cloud Workbench's retrieval-context cache (Section 5, Cloud Workbench ADR-003) |
+| `modules/redis-cache` | Reusable | The Redis instance backing Cloud Workbench's retrieval-context cache and session memory (Section 5, Cloud Workbench ADR-003, ADR-009) |
 
 **Kubernetes namespaces**: `ns-cloud-workbench-prod`, `ns-cloud-workbench-staging`, `ns-mlops-prod`, one namespace per environment/domain for RBAC and resource-quota isolation.
 
@@ -372,9 +369,11 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 
 | Table | Key columns |
 |---|---|
-| `audit.workbench_query_log` | `request_id`, `user_id`, `vertical_id`, `query_text`, `retrieved_refs` (JSON), `model_input`, `model_output`, `action_taken` (nullable), `risk_tier` (nullable), `timestamp` |
+| `audit.workbench_query_log` | `request_id`, `session_id`, `user_id`, `vertical_id`, `query_text`, `retrieved_refs` (JSON), `model_input`, `model_output`, `action_taken` (nullable), `risk_tier` (nullable), `timestamp` |
 
 Governed Automation's action-level audit trail is separate: Temporal's own workflow history captures every state transition for a proposed action as it happens, and `gold.fact_action_audit` (Section 6) is the queryable, reportable copy synced once a workflow completes — this table logs the query/generation side of Cloud Workbench, not action execution.
+
+This table also serves as Cloud Workbench's long-term memory (Cloud Workbench ADR-009, §4.1) — `session_id` and `user_id` scope a lookup when a user references a prior conversation, reusing this table's existing retention policy and RBAC rather than a second durable store.
 
 **Tracing**: OpenTelemetry instrumentation across every node in Section 5's pydantic-graph workflow and every Section 6 action call, span attributes include `request_id`, `vertical_id`, `node_name`, `duration_ms`.
 

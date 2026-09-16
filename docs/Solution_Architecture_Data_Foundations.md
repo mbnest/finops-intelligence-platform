@@ -1,8 +1,8 @@
 # Solution Architecture: Data Foundations
 
-Phase 1 of the platform sequenced in `FinOps Solution Overview.md`. Split out from what was originally a single combined "Internal Assistant" solution architecture document — that document tried to be the top-level narrative for four different phases at once (data foundation, self-serve, governed automation, and parts of intelligence), which made it hard to tell which section belonged to which phase. This document covers only the data foundation: everything downstream (Core Intelligence, Self-Serve Foundations, Governed Automation, Cloud Workbench) is built on top of it, not part of it.
+Phase 1 of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md). Split out from what was originally a single combined "Internal Assistant" solution architecture document — that document tried to be the top-level narrative for four different phases at once (data foundation, self-serve, governed automation, and parts of intelligence), which made it hard to tell which section belonged to which phase. This document covers only the data foundation: everything downstream (Core Intelligence, [Self-Serve Foundations](Solution_Architecture_Self_Serve_Foundations.md), [Governed Automation](Solution_Architecture_Governed_Automation.md), [Cloud Workbench](Solution_Architecture_Cloud_Workbench.md)) is built on top of it, not part of it.
 
-Requirements, org details, and specific tool choices below are **inferred** from JD language and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: `Platform_Build_Specification.md` §1–4.
+Requirements, org details, and specific tool choices below are **inferred** from JD language and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §1–4.
 
 ---
 
@@ -57,7 +57,7 @@ flowchart TD
 
 The four boxes feeding Source Systems are the organization's real, existing systems — nothing about them is designed in this document; Section 4.1 covers what's actually pulled from each.
 
-The sections below detail each layer. This is where the platform's diagram in `FinOps Solution Overview.md` gets its detail for Phase 1.
+The sections below detail each layer. This is where the platform's diagram in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md) gets its detail for Phase 1.
 
 ### 3.1 Technology stack
 
@@ -70,7 +70,7 @@ The sections below detail each layer. This is where the platform's diagram in `F
 | Governance | Snowflake Horizon (RBAC, row access policies, dynamic data masking, object tagging, Access History) | Native governance surface, no separate catalog product. |
 | Versioning / ACID | Snowflake Time Travel + zero-copy cloning | Audit and "what did we know at the time" incident reconstruction without a lakehouse table format. |
 | Knowledge graph | Neo4j | A dedicated property-graph database — not implemented in Snowflake. See ADR-004. |
-| Vector store (RAG) | Postgres + pgvector | Backs Cloud Workbench's hybrid retrieval (§4.1, ADR-006) over the semantic layer's documentation — not part of this platform's own storage, listed here for a complete picture. |
+| Session memory / retrieval cache | Redis | Backs Cloud Workbench's session memory and retrieval cache (Cloud Workbench ADR-003, ADR-009) — not part of this platform's own storage, listed here for a complete picture. No vector store: Cloud Workbench's definitional questions are answered via a direct Snowflake lookup against the Semantic View metric catalog (below), not embedding-based search (Cloud Workbench ADR-001, ADR-006). |
 | Orchestration | Airflow (or Azure Data Factory) | Named in the JD; schedules ingestion and the dbt/Snowpark transform chain. See Build Specification §1–2. |
 | Infrastructure | AKS, Terraform/Bicep | Shared platform-wide compute and IaC, not specific to this phase. See §4.5. |
 
@@ -104,7 +104,7 @@ This is also where the **feature store** for Core Intelligence's ML models lives
 
 **BI serving is native, not a separate path — and routes through the semantic layer, not raw gold.** Power BI connects to Snowflake Semantic Views (Section 4.4) for anything with a governed metric definition — spend, burn rate, RI coverage — the same definitions Cloud Workbench and the knowledge graph use, so a dashboard's number can't quietly diverge from what any other consumer reports (the same discipline ADR-002 established, applied here rather than carved out as an exception for BI). Gold-schema tables remain directly queryable for ad hoc analyst SQL that isn't yet expressible as a named metric, but that is the fallback path, not the default one. Either way, there's no data-sharing protocol, no export step, and no second platform to keep in sync, since both gold and the semantic layer already live here. This replaces what an earlier version of this design handled as an "optional Snowflake serving path" layered on top of a Databricks lakehouse; with Snowflake as the platform itself, that extra hop no longer exists.
 
-**Connecting to the right source doesn't by itself stop a second semantic layer from growing inside Power BI.** A report can query a Semantic View and still define its own local DAX measure that recomputes "EC2 spend" independently over the same underlying columns — same table, but a second, competing definition, exactly the inconsistency ADR-002 exists to prevent, one layer higher than a query source can fix by itself. Existing Power BI reports being redirected here (per `FinOps Solution Overview.md`'s dashboards review item) must be audited for this specifically: any local measure duplicating a Semantic View metric gets replaced by referencing that metric field directly, not ported over as-is just because the query source changed. Preferring **DirectQuery** over Import mode where performance allows helps structurally (it discourages building out a large local data model to attach measures to), but it isn't sufficient on its own — a DirectQuery report can still define a local measure — so this has to be a reporting/governance standard (dataset certification, peer review), not just a connection-mode choice.
+**Connecting to the right source doesn't by itself stop a second semantic layer from growing inside Power BI.** A report can query a Semantic View and still define its own local DAX measure that recomputes "EC2 spend" independently over the same underlying columns — same table, but a second, competing definition, exactly the inconsistency ADR-002 exists to prevent, one layer higher than a query source can fix by itself. Existing Power BI reports being redirected here (per [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md)'s dashboards review item) must be audited for this specifically: any local measure duplicating a Semantic View metric gets replaced by referencing that metric field directly, not ported over as-is just because the query source changed. Preferring **DirectQuery** over Import mode where performance allows helps structurally (it discourages building out a large local data model to attach measures to), but it isn't sufficient on its own — a DirectQuery report can still define a local measure — so this has to be a reporting/governance standard (dataset certification, peer review), not just a connection-mode choice.
 
 #### Conceptual gold-layer model
 
