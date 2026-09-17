@@ -4,7 +4,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 | | |
 |---|---|
-| **Status** | Steps 1 to 4 done; step 5 next |
+| **Status** | Steps 1 to 5 done; step 6 (CI) next |
 | **Last updated** | 2026-09-17 |
 | **Responds to** | Review item 3.1: "No code at all" |
 
@@ -12,7 +12,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 ## Resume here
 
-1. **Current step**: 5 (MCP server). Steps 1 to 4 are complete and verified.
+1. **Current step**: 6 (CI). Steps 1 to 5 are complete and verified.
 2. **Next action**: whatever is the first unchecked box in the current step.
 3. **How to verify where things stand**: run the step's "Done when" commands. Anything that passes is done, whatever the checklist says.
 4. **Log**: the Progress Log at the bottom records what changed each session and anything left half-finished.
@@ -48,6 +48,8 @@ Anything that doesn't serve one of these stays out.
 | D12 | **The detector's dollar floor is $5/day, not $25** | At $25 the injected step change ($6.45/day, about $190 a month) was invisible. The floor is a judgment about what is worth chasing, so it lives in `core_intelligence/config.yaml`, not in code |
 | D13 | **OPA runs in Docker, pinned to 1.20.2** | OPA is a Go binary with no PyPI distribution, so uv can't install it. `run_policy_tests.sh` wraps the Docker call; the version is pinned so results don't drift with `latest` |
 | D14 | **Temporal dev server and OPA run from docker-compose; tests use short timers, not time-skipping** | Time-skipping downloads a test server binary on first use. Docker was already in play, so the workflow tests run against a real dev server with the windows shortened through config (1s opt-out, 5s approval). The durations are workflow input, so production keeps 24-hour windows |
+| D16 | **Persona is set per server process, through the environment** | The design derives persona from identity. Here `FINOPS_PERSONA` decides which tools get bound at build time, which keeps the enforcement point visible: a client connects to the platform server or a vertical server, and gets a different tool list |
+| D17 | **Tests share one automation-state reset fixture** | Run caps, the kill switch, and exclusions are real state in DuckDB, shared with the demo. The MCP action test failed the first time because earlier runs had used up APM-1003's 10 executions per 24 hours. The guardrail was right; the test needed isolation |
 | D15 | **Governed Automation state lives in the same DuckDB file as gold** | The design puts contracts, automation_controls, automation_exclusions, and the action audit in managed Postgres. One store keeps the demo runnable with no extra service; the table names and shapes match the specification |
 
 ## Stand-ins
@@ -148,11 +150,14 @@ Result: recall 1.00 on all three kinds against the baseline's 1.00, 1.00, 0.00 (
 
 **Proves**: claim 4.
 
-- [ ] `mcp_server/`: `get_cost_by_account`, `get_metric_definition`, `get_anomalies`, `propose_action`
-- [ ] Persona and vertical scoping; Vertical persona has no `propose_action`
-- [ ] Tests for scoping; a short walkthrough using an MCP client
+- [x] `mcp_server/personas.py`: Platform and Vertical personas, verticals, and whether action tools bind
+- [x] `mcp_server/queries.py`: every read filtered by the caller's verticals, standing in for `rap_vertical_scope`
+- [x] `mcp_server/server.py`: `get_metric_definition`, `get_cost_by_account`, `get_anomalies`, `get_spend_variance`, and `propose_action` (bound only for a persona that may act)
+- [x] Refusals come back as tool errors with the reason, not a generic failure
+- [x] 12 tests: tool binding per persona, cross-vertical denial, scoped anomalies and variance, metric grounding, unknown metric, proposal through the harness, out-of-scope proposal, and a stdio round trip
+- [x] Tests shown to fail: binding the action tool for every persona fails the binding test
 
-**Done when**: scoping tests pass and the walkthrough answers "why did this vertical's bill change?" from tool calls.
+**Done when**: scoping tests pass and the walkthrough answers "why did this vertical's bill change?" from tool calls. Result: 40 tests pass overall; over stdio the platform server exposes 5 tools and the workplace server 4.
 
 ### Step 6: CI
 
@@ -234,6 +239,7 @@ demo/
 | Date | Step | What happened | Left unfinished |
 |---|---|---|---|
 | 2026-09-17 | Plan | Plan written; decisions D1–D10 recorded; DuckDB chosen over a Snowflake trial | |
+| 2026-09-17 | 5 | MCP server with persona-bound tools and vertical-scoped queries, 12 tests including a stdio round trip, README walkthrough with client config. Verified: binding the action tool for everyone fails its test. Found by testing: APM-1003 had hit its 10-per-24h run cap from earlier runs, so tests now share a state reset and run_demo has --fresh | Nothing. Step 6 is CI |
 | 2026-09-17 | 4 | propose_action workflow on Temporal, idle-resource proposals, DuckDB-backed contracts/controls/exclusions/audit, docker-compose for Temporal and OPA, 12 workflow tests including a replay test. Verified: removing the kill-switch re-check fails its test; four proposals produce four different governed outcomes | Nothing. Step 5 is the MCP server |
 | 2026-09-17 | 3 | Rego policies for risk tiers and all guardrails, 23 opa tests, Docker runner pinned to OPA 1.20.2. Verified: mutating the production gate fails 4 tests. Guardrails only restrict; advisory is the default | Nothing. Step 4 needs a Temporal dev server (Docker) |
 | 2026-09-17 | 2 | Detector, episode grouping, eval gate, 17 unit tests. Verified: gate exits 1 when the detector is degraded and 0 when restored; detector beats the naive baseline on the ramp. Tuning during the step: dollar floor lowered to $5 (D12), episodes added after daily alerting produced 25 alerts for 3 anomalies (D11) | Nothing. Committed separately from step 1 |

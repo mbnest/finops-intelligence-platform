@@ -55,12 +55,45 @@ docker compose up -d
 ./run_policy_tests.sh -v
 ```
 
-Run every idle-resource proposal through the governed harness:
+Run every idle-resource proposal through the governed harness, and the full test suite:
 
 ```bash
-uv run python -m governed_automation.run_demo
+uv run python -m governed_automation.run_demo --fresh
 uv run pytest
 ```
+
+(`--fresh` clears the action audit first. Run caps count executed actions in a rolling 24 hours, so a
+repeated demo otherwise falls back to advisory, which is the guardrail doing its job.)
+
+## Using it as an agent's tools
+
+The MCP server is the platform's tool surface. Point any MCP client at it: MCP Inspector, Claude
+Desktop, or Claude Code. Two personas, two different servers:
+
+```json
+{
+  "mcpServers": {
+    "finops-platform": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/demo", "python", "-m", "mcp_server.server"],
+      "env": { "FINOPS_PERSONA": "platform" }
+    },
+    "finops-workplace": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/demo", "python", "-m", "mcp_server.server"],
+      "env": { "FINOPS_PERSONA": "vertical", "FINOPS_VERTICALS": "workplace" }
+    }
+  }
+}
+```
+
+Questions worth asking each of them:
+
+- "Why did my bill change in June?" The answer comes from `get_spend_variance`, split into causes, and
+  `get_metric_definition` says how the metric is computed.
+- "What anomalies do I have, and what is the evidence?"
+- "Propose stopping the idle facilities dev box." The platform server runs it through Governed
+  Automation and reports what the harness decided. The workplace server has no such tool.
 
 Later steps add commands here as they land.
 
@@ -158,6 +191,18 @@ Three behaviours the tests pin down, because they are what a reviewer should be 
 - **A recorded workflow history replays against the current code**, which is how non-deterministic changes get caught before they break workflows that are mid-approval.
 
 Activities are idempotent on the workflow ID, so a retried worker cannot execute or double count an action. Nothing here calls a cloud API: the executor is a stand-in, because what is being shown is the decision path around it.
+
+**8. Personas are enforced by what exists, not by what the model is told.** The same server, built for two callers:
+
+| | platform | workplace vertical |
+|---|---|---|
+| tools bound | 5, including `propose_action` | 4, no action tool |
+| anomalies visible | every vertical | workplace only |
+| `get_cost_by_account` on another vertical's account | allowed | refused, with the reason |
+
+A Vertical caller cannot take an action because the tool is never bound for that persona, so there is no instruction to argue with. Scope is checked again inside every query, the way a row access policy applies to every consumer. Binding the action tool for everyone fails the persona test.
+
+Refusals say why ("advisory is outside your verticals (workplace)"), and an unknown metric name answers with the metrics that do exist, so a caller can recover instead of guessing.
 
 ## How the data is made
 

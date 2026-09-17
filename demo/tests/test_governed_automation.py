@@ -42,16 +42,6 @@ async def worker(client):
             yield queue
 
 
-@pytest.fixture(autouse=True)
-def reset_controls():
-    """Every test starts with automation on globally and no exclusions."""
-    storage.connection()
-    storage.cursor().execute("delete from automation_controls where scope_type != 'global'")
-    storage.set_automation_enabled("global", None, True, "test reset")
-    storage.cursor().execute("delete from automation_exclusions")
-    yield
-
-
 def proposal(resource_id="aws-ec2-facilities-dev", apm_id="APM-1003", environment="nonprod",
              action_type="stop", blast_radius=1, vertical_id="workplace"):
     return {

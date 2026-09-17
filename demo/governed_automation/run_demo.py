@@ -8,6 +8,7 @@ action that waits for a person.
 """
 
 import asyncio
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -51,6 +52,11 @@ async def run_proposal(client, proposal, timers, run_id):
 async def main():
     config = load_config()
     storage.connection()  # create the control, exclusion, and audit tables before the worker starts
+    if "--fresh" in sys.argv:
+        # Run caps count executed actions in a rolling 24 hours, so repeated demos eventually fall
+        # back to advisory. That is the guardrail working; --fresh clears the history to start over.
+        storage.cursor().execute("delete from fact_action_audit")
+        storage.set_automation_enabled("global", None, True, "demo reset")
     client = await Client.connect(config["temporal_address"])
     timers = {"opt_out_window_seconds": config["opt_out_window_seconds"],
               "approval_timeout_seconds": config["approval_timeout_seconds"]}
