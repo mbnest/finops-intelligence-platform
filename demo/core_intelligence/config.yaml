@@ -1,0 +1,25 @@
+# Detector settings and the thresholds the eval gate enforces.
+model_version: anomaly-robust-z-0.1.0
+
+detector:
+  window_days: 28           # trailing days used for the baseline
+  min_history_days: 10      # a resource is not scored until it has this much history
+  min_robust_z: 4.0         # robust z score above which a day is flagged
+  min_dollar_impact: 5.0    # ignore statistically odd days that cost too little to chase
+  episode_gap_days: 2       # consecutive flagged days within this gap are one anomaly, not many
+
+baseline:
+  # The naive comparison the detector has to beat: flag any day above a fixed multiple of the
+  # resource's trailing mean.
+  window_days: 28
+  multiple: 1.5
+  min_dollar_impact: 5.0
+
+gate:
+  min_recall_by_kind:
+    spike: 1.0
+    step: 1.0
+    ramp: 1.0
+  max_alerts_per_vertical_per_week: 2.0
+  max_expected_change_false_positives: 0
+  expected_change_window_days: 3   # days after an expected change during which a flag counts as a false positive

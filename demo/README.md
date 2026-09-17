@@ -39,6 +39,14 @@ Then print the queries below with their results:
 uv run python tour.py
 ```
 
+Score the anomaly detector against injected anomalies it never sees:
+
+```bash
+uv run python -m core_intelligence.anomaly
+uv run python -m core_intelligence.eval_gate
+uv run pytest
+```
+
 Later steps add commands here as they land.
 
 ## What to look for
@@ -80,6 +88,26 @@ Provider line item IDs aren't stable across deliveries, so rows are never upsert
 | 2026-06 | project_mgmt | -73.6 | 0.0 | -250.6 | 134.8 | 42.2 | 0.0 |
 
 June's jump in investments is a new GPU resource, not a price rise. Project management's drop is a removed resource, partly offset by usage growth elsewhere. `other_change` is charges with no resource, here the unused commitment above.
+
+**5. The anomaly detector is scored, not trusted.** A FinOps practice that has never scored its own alerts has no labels, so the eval gate does what the design calls for: inject anomalies of known kind and size, and measure against them. The detector never reads the answer key.
+
+| metric | detector | naive baseline |
+|---|---|---|
+| recall: spike | 1.00 | 1.00 |
+| recall: step | 1.00 | 1.00 |
+| recall: ramp | 1.00 | 0.00 |
+| alerts raised | 4 | 2 |
+| alerts per vertical per week | 0.06 | 0.03 |
+| expected changes wrongly flagged | 0 | 0 |
+
+The baseline (any day above 1.5x the trailing mean) catches the spike and the step but never the slow ramp, because the mean drifts up with it. The detector compares each day with the median of its own recent history, measured in median absolute deviations, so a gradual climb still stands out.
+
+Two things the gate checks beyond recall:
+
+- **Alert volume.** A step change stays anomalous for weeks. Alerting daily would produce 25 alerts for 3 real problems, so consecutive days collapse into one anomaly that accumulates impact. Alert fatigue is the main adoption risk, so it is a gate, not a footnote.
+- **Expected changes.** A new GPU resource and a removed VM are real cost changes, not anomalies. Flagging either fails the gate.
+
+The gate exits non-zero when a threshold is missed, so CI can block the change. Raising the dollar threshold so the detector misses the step and the ramp makes it exit 1 and name both misses.
 
 ## How the data is made
 

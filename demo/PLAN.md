@@ -4,7 +4,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 | | |
 |---|---|
-| **Status** | Step 1 done; step 2 next |
+| **Status** | Steps 1 and 2 done; step 3 next |
 | **Last updated** | 2026-09-17 |
 | **Responds to** | Review item 3.1: "No code at all" |
 
@@ -12,7 +12,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 ## Resume here
 
-1. **Current step**: 2 (anomaly detector and eval gate). Step 1 is complete and verified.
+1. **Current step**: 3 (Guardrail Engine policies in OPA). Steps 1 and 2 are complete and verified.
 2. **Next action**: whatever is the first unchecked box in the current step.
 3. **How to verify where things stand**: run the step's "Done when" commands. Anything that passes is done, whatever the checklist says.
 4. **Log**: the Progress Log at the bottom records what changed each session and anything left half-finished.
@@ -44,6 +44,8 @@ Anything that doesn't serve one of these stays out.
 | D8 | **Action execution is a fake that writes an audit row** | No real cloud calls. The workflow, policy, and guardrails are what's being shown |
 | D9 | **Names match the Build Specification** | `fact_cost_daily`, `cost_line_items_clean`, `metric_ri_coverage`, `propose_action`, `classify_action_risk`, and so on, so code and docs visibly describe the same system |
 | D10 | **Python 3.13 with uv; latest package versions** | Per repository standards. `uv add`, `uv run` only |
+| D11 | **Consecutive flagged days are one anomaly episode** | A step change or ramp stays anomalous for weeks. Alerting daily gave 25 alerts for 3 real problems. Alert fatigue is the stated adoption risk (MLOps Pipeline §1.3), so episodes are what gets written to `fact_anomaly` and counted by the gate |
+| D12 | **The detector's dollar floor is $5/day, not $25** | At $25 the injected step change ($6.45/day, about $190 a month) was invisible. The floor is a judgment about what is worth chasing, so it lives in `core_intelligence/config.yaml`, not in code |
 
 ## Stand-ins
 
@@ -102,12 +104,16 @@ both succeed, every test passes, and a query of `metric_ri_coverage` and `metric
 
 **Proves**: claim 2.
 
-- [ ] `core_intelligence/anomaly.py`: rolling median and MAD score per resource and service, on `effective_cost`
-- [ ] Writes `gold.fact_anomaly` with `model_version` and `contributing_factors`
-- [ ] `core_intelligence/eval_gate.py`: recall on injected anomalies by kind, alerts per vertical per week, against a naive fixed-threshold baseline; pass or fail against thresholds in config
-- [ ] Tests for the scorer on small fixtures
+- [x] `core_intelligence/anomaly.py`: robust z score (median and median absolute deviation) per resource over a trailing window, on `effective_cost`
+- [x] Consecutive flagged days collapse into one episode (D11)
+- [x] Writes `gold.fact_anomaly` with `severity`, `model_version`, and `contributing_factors` (baseline, peak impact, days observed, peak score)
+- [x] `core_intelligence/eval_gate.py`: recall by kind, detection lag, alerts per vertical per week, and false positives on expected changes, against a naive fixed-multiple baseline; thresholds in `config.yaml`; exits non-zero on failure
+- [x] 17 pytest tests for the scorer, episode grouping, and every gate failure path
+- [x] Gate shown to fail end to end: raising the dollar floor to $25 makes it miss the step and ramp, report both, and exit 1
 
 **Done when**: the eval report prints, the detector beats the naive baseline on recall at equal or lower alert volume, and the gate exits non-zero if thresholds are missed.
+
+Result: recall 1.00 on all three kinds against the baseline's 1.00, 1.00, 0.00 (it never catches the ramp); 4 alerts against the baseline's 2, one of which matches no injected anomaly; 0 expected changes flagged.
 
 ### Step 3: Guardrail Engine policies (OPA)
 
@@ -219,4 +225,5 @@ demo/
 | Date | Step | What happened | Left unfinished |
 |---|---|---|---|
 | 2026-09-17 | Plan | Plan written; decisions D1–D10 recorded; DuckDB chosen over a Snowflake trial | |
+| 2026-09-17 | 2 | Detector, episode grouping, eval gate, 17 unit tests. Verified: gate exits 1 when the detector is degraded and 0 when restored; detector beats the naive baseline on the ramp. Tuning during the step: dollar floor lowered to $5 (D12), episodes added after daily alerting produced 25 alerts for 3 anomalies (D11) | Nothing. Committed separately from step 1 |
 | 2026-09-17 | 1 | Generator, bronze/silver/gold, five metrics, 45 dbt tests passing from a clean run; generation deterministic (identical file hashes across runs). Verified: restated May Azure delivery replaces delivery 1; spike lands on 2026-05-12; Azure reservation utilization drops to about 92% after the covered VM ends; variance components sum exactly | Nothing. Not yet committed |
