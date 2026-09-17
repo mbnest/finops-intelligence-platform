@@ -76,6 +76,8 @@ Mediation is implemented here, as the bronze-to-silver transform within Snowflak
 | `gold.dim_tag` | Dimension | `tag_key`, `tag_value`, `resource_id` (FK) | Supports metadata filtering |
 | `gold.fact_anomaly` | Fact | `anomaly_id`, `resource_id`, `detected_date`, `severity`, `model_version`, `contributing_factors` (JSON) | Written by Core Intelligence (MLOps Pipeline doc) |
 | `gold.fact_recommendation` | Fact | `recommendation_id`, `resource_id`, `type`, `estimated_savings_usd`, `status`, `model_version` | Written by Core Intelligence |
+| `gold.dim_rate_card` | Dimension | `rate_card_id` (PK), `provider`, `resource_type`, `contracted_unit_rate`, `effective_start_date`, `effective_end_date` | Ingested vendor rate data, not derived — source system not yet confirmed with the organization (Data Foundations §4.1) |
+| `gold.fact_bill_verification` | Fact | `verification_id`, `cost_fact_id` (FK), `confidence_score`, `evidence` (JSON), `status`, `model_version` | Written by Bill Verification's reconciliation model |
 
 **Governance/RBAC (Snowflake Horizon)**:
 - Row access policy `rap_vertical_scope` on `gold.fact_cost_daily` and `gold.fact_anomaly`, filtering by `vertical_id` against the requesting user/service principal's assigned vertical(s)
@@ -122,8 +124,10 @@ Mediation is implemented here, as the bronze-to-silver transform within Snowflak
 | `CostLineItem` | line_item_id, date, cost | `REFERENCES → Resource` |
 | `Anomaly` | anomaly_id, severity | `DETECTED_ON → Resource` |
 | `Recommendation` | recommendation_id, type | `TARGETS → Resource` |
+| `RateCard` | rate_card_id, provider, resource_type, contracted_unit_rate | `PRICES → CostLineItem` |
+| `BillVerification` | verification_id, confidence_score, status | `RECONCILES → CostLineItem` |
 
-**Graph store**: Neo4j (Data Foundations ADR-004) — a dedicated property-graph database, not implemented in Snowflake. Node labels and relationship types mirror the ontology table above directly (`Resource`, `Account`, `Vertical`, `Tag`, `CostLineItem`, `Anomaly`, `Recommendation`).
+**Graph store**: Neo4j (Data Foundations ADR-004) — a dedicated property-graph database, not implemented in Snowflake. Node labels and relationship types mirror the ontology table above directly (`Resource`, `Account`, `Vertical`, `Tag`, `CostLineItem`, `Anomaly`, `Recommendation`, `RateCard`, `BillVerification`).
 
 **Graph population pipeline**:
 

@@ -14,7 +14,7 @@ Cloud spend across AWS, Azure, and GCP grows unpredictably; manual review of usa
 >
 > **Assumption adopted:** Current State describes this step as manual review, not scored logic, so today's check is assumed to be a true pass/fail (or fully manual) with no existing confidence-scoring behavior. This model is therefore genuinely net-new — not a productionization of something the stored procedures already approximate.
 
-> **Scope boundary.** This document provides full requirements, architecture, and ADRs for (a), (b), and (c) above — anomaly detection, rightsizing, and RI/savings-plan modeling. Bill verification (d) is scoped only as a problem statement here; it shares the same confidence-scored, hard-rule-routed pattern (see the callout above, and ADR-M4 in `FinOps Solution Overview.md`) but gets its own dedicated architecture once written, per the Solution Overview's Sub-Document Index — folding it fully into this document would stretch its title and scope past what's actually designed here.
+> **Scope boundary.** This document provides full requirements, architecture, and ADRs for (a), (b), and (c) above — anomaly detection, rightsizing, and RI/savings-plan modeling. Bill verification (d) originated as a problem statement here; it shares the same confidence-scored, hard-rule-routed pattern (see the callout above, and ADR-M4 in `FinOps Solution Overview.md`) and now has its own dedicated architecture in `Solution_Architecture_Bill_Verification.md` — folding it fully into this document would have stretched its title and scope past what's designed here.
 
 ### 1.2 Functional requirements (inferred)
 

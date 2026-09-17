@@ -86,6 +86,7 @@ The sections below detail each layer. This is where the platform's diagram in [F
 | GCP Billing Export | GCP's native billing/usage export, plus its usage-telemetry APIs | Primary billing/usage source for the GCP portion of the estate |
 | Application Portfolio Management (APM) tool | the organization's existing application metadata system — owner, technical contact, classification — with its APM ID tagged onto roughly nearly all of cloud resources and already used by security/compliance for their checks | A materially stronger entity-resolution signal than cloud-native tags alone — an authoritative, organization-level master key, not something derived per-cloud. Feeds the ontology (§4.4); see Build Specification for ingestion and data-quality treatment |
 | Terraform state (read-only, via the organization's state backend — Terraform Cloud/Enterprise API, or a state file in a cloud storage backend) | Resolved infrastructure-as-code state, not the raw `.tf` source — already carries resolved values, directly comparable to a live resource's observed configuration without evaluating variables or modules. Two fields matter downstream: `managed_by_iac`, and a drift flag (live config vs. last-declared) | A rightsizing recommendation or an automated action that only looks at observed utilization can't tell an accidentally over-provisioned resource from a deliberately, approvedly over-provisioned one — that distinction lives in whatever declared the resource. See MLOps Pipeline §2.2 for how this shapes recommendation context, and Governed Automation §3.3 for why this gates direct execution |
+| Vendor rate data (contracted unit rates per provider/service, keyed to contract terms — source system not yet confirmed with the organization) | The negotiated rate the organization actually pays per service/SKU, with an effective date range — **functional data required for reconciliation, not a lookup/reference table**: without it, there is nothing to compare an invoiced line item against | Bill Verification (Phase 4) reconciles invoiced line items against these contracted rates; without this source ingested into the gold layer, that reconciliation has nothing to check against. See Bill Verification §4.1 |
 
 The three cloud sources have materially different schemas, tag semantics, and refresh cadences — this heterogeneity is the reason the platform's silver stage exists to conform them, rather than exposing provider-native schemas to anything downstream.
 
@@ -120,6 +121,8 @@ erDiagram
     RESOURCE ||--o{ COST_FACT : "incurs"
     RESOURCE ||--o{ ANOMALY : "detected on"
     RESOURCE ||--o{ RECOMMENDATION : "targets"
+    RATE_CARD ||--o{ COST_FACT : "priced against"
+    COST_FACT ||--o| BILL_VERIFICATION : "reconciled by"
 
     VERTICAL {
         string vertical_id PK
@@ -171,9 +174,25 @@ erDiagram
         decimal estimated_savings_usd
         string status
     }
+    RATE_CARD {
+        string rate_card_id PK
+        string provider
+        string resource_type
+        decimal contracted_unit_rate
+        date effective_start_date
+        date effective_end_date
+    }
+    BILL_VERIFICATION {
+        string verification_id PK
+        string cost_fact_id FK
+        decimal confidence_score
+        string evidence
+        string status
+        string model_version
+    }
 ```
 
-This is the conceptual counterpart to the literal gold-layer table list in Build Specification §3 — a star schema centered on `COST_FACT`, with `RESOURCE` as the hub every other entity (ownership via `APPLICATION`/APM ID, classification via `TAG`, and both ML outputs) hangs off of. Owner/Technical Contact volatility (Section 4.4's SCD Type 2 treatment) is a change-tracking detail on `APPLICATION`, omitted here to keep the conceptual model at entity/relationship grain rather than physical-table grain.
+This is the conceptual counterpart to the literal gold-layer table list in Build Specification §3 — a star schema centered on `COST_FACT`, with `RESOURCE` as the hub every other entity (ownership via `APPLICATION`/APM ID, classification via `TAG`, and both ML outputs) hangs off of. Owner/Technical Contact volatility (Section 4.4's SCD Type 2 treatment) is a change-tracking detail on `APPLICATION`, omitted here to keep the conceptual model at entity/relationship grain rather than physical-table grain. `RATE_CARD` and `BILL_VERIFICATION` (Bill Verification, Phase 4) follow the same pattern already established for `ANOMALY`/`RECOMMENDATION`: input data and model output both land in gold, not held separately by the phase that produces or consumes them.
 
 ### 4.4 Semantic layer, ontology, and knowledge graph
 
@@ -209,7 +228,7 @@ A starting set, anchored to the questions a business vertical would actually ask
 
 The entities and relationships that structure this domain, how they're implemented as a queryable graph, and how identity/staleness are handled within it.
 
-- **Ontology**: defines the entities and relationships that structure this domain — Account, Vertical, Resource, Tag, Cost Line Item, Anomaly, Recommendation — and how they relate (a Resource belongs to an Account, an Account rolls up to a Vertical, a Cost Line Item references a Resource and a time period). This is the schema for the graph below. **The `Resource` entity carries the APM ID as its primary cross-cloud key** where available (~nearly all of resources), with Owner, Technical Contact, and Classification modeled as attributes sourced from APM, not re-derived from cloud tags.
+- **Ontology**: defines the entities and relationships that structure this domain — Account, Vertical, Resource, Tag, Cost Line Item, Anomaly, Recommendation, Rate Card, Bill Verification — and how they relate (a Resource belongs to an Account, an Account rolls up to a Vertical, a Cost Line Item references a Resource and a time period, a Cost Line Item is priced against a Rate Card and reconciled by a Bill Verification record). This is the schema for the graph below. **The `Resource` entity carries the APM ID as its primary cross-cloud key** where available (~nearly all of resources), with Owner, Technical Contact, and Classification modeled as attributes sourced from APM, not re-derived from cloud tags.
 - **Ontology artifact — not yet formalized.** The entity/relationship table above (mirrored in Build Specification §4) is documentation, not a governed artifact in its own right. Neo4j's node labels and relationship types are one *implementation* of the ontology, conflated here with the ontology itself because nothing independent of that implementation exists yet. Given §4.5 already treats the ontology as "a shared contract every downstream phase depends on," it should be authored as a standalone, versioned artifact — OWL or RDFS are the candidate formalisms — with the Neo4j schema and any other consumer required to conform to it, rather than being the definition. Not done here; no target phase assigned.
 - **Knowledge graph**: the ontology, populated and kept current in **Neo4j**, a dedicated property-graph database — not implemented relationally in Snowflake (see ADR-004). Gold-schema tables remain the system of record; a sync job (Build Specification §4) upserts nodes and relationships into Neo4j whenever gold refreshes, sourced from two layers, not one: a node's **static attributes** (resource type, region, tag values) come straight from the relevant gold table, but any **computed property** placed on a node (e.g., a running spend total) is pulled from the semantic layer's governed metric definition (Snowflake Semantic Views, above), never recomputed independently inside the sync job. This is the same discipline ADR-002 established for every other consumer — one governed definition, reused, not re-derived — applied to the graph instead of waived for it. This is what enables **GraphRAG**-style retrieval for Cloud Workbench — questions that are fundamentally relational ("show me all resources tagged to this vertical that had a cost anomaly and a recent deployment") are Cypher graph traversals, not vector similarity lookups and not a join against the gold schema directly.
 - **Entity resolution** happens here: resolve on APM ID first where present — a stronger, organizationally-authoritative signal than cross-cloud tag matching — falling back to fuzzy tag-based matching only for the small unresolved gap. That gap itself is worth tracking as a governance metric: an untagged resource is both a FinOps chargeback blind spot and a security/compliance blind spot, since the same APM ID drives both.
@@ -246,7 +265,7 @@ Cloud Workbench and Governed Automation add their own phase-specific observabili
 - *Consequences*: Fewer moving parts and no cross-platform sync surface. The tradeoffs are real, though: Snowflake's compute model (virtual warehouses) has a different scaling/cost profile than a Spark cluster's, and heavier custom Python ML work (deep learning, GPU-bound training) is less native here than on a Spark/GPU-cluster-centric platform. This is an accepted tradeoff given MLOps Pipeline ADR-002 already scopes this domain's models as explainable/statistical rather than deep learning — if that scope ever changes, this consequence should be revisited, not assumed away.
 
 **ADR-004: Implement the knowledge graph in Neo4j, a dedicated graph database, rather than relationally in Snowflake**
-- *Context*: GraphRAG-style retrieval (Cloud Workbench §4.1) needs multi-hop traversal over the ontology in Section 4.4. Snowflake has no native graph-traversal query language; a relational implementation (gold-schema tables plus recursive CTEs) can express this ontology's traversal at its current shallow depth (roughly seven entity types, 2-3 hops, Section 4.3's ER model), but that shallowness is also this platform's earliest and least mature phase — the ontology is realistically going to grow, and a dedicated graph database is the standard, purpose-built tool for this pattern.
+- *Context*: GraphRAG-style retrieval (Cloud Workbench §4.1) needs multi-hop traversal over the ontology in Section 4.4. Snowflake has no native graph-traversal query language; a relational implementation (gold-schema tables plus recursive CTEs) can express this ontology's traversal at its current shallow depth (roughly nine entity types, 2-3 hops, Section 4.3's ER model), but that shallowness is also this platform's earliest and least mature phase — the ontology is realistically going to grow, and a dedicated graph database is the standard, purpose-built tool for this pattern.
 - *Decision*: Populate and query the knowledge graph in Neo4j. Gold-schema tables in Snowflake remain the system of record; a sync job (Build Specification §4) upserts nodes and relationships into Neo4j whenever gold refreshes, so Neo4j is a derived, resyncable view, not a second copy that can drift authoritatively from the source. Within that sync job, static node attributes come from gold tables directly, but any computed property comes from the semantic layer's metric definitions (§4.4), not a second, independently-written calculation — the same "one governed definition, reused everywhere" rule ADR-002 established, applied to the graph rather than carved out as an exception to it.
 - *Alternatives considered*: Recursive CTEs against the gold schema directly, viable at today's shallow ontology depth and evaluated as the default in an earlier version of this document, but rejected here — Cypher's traversal ergonomics and headroom for graph-native operations (centrality, community detection, variable-length path search) are worth the added system now rather than migrating under pressure once the ontology outgrows what SQL joins express comfortably.
 - *Consequences*: One more database to operate and keep in sync (the graph-sync job, Build Specification §4), and query logic split across two systems (Snowflake for aggregation, Neo4j for traversal) rather than one — accepted for the traversal ergonomics and room to grow, given gold remains the single source of truth Neo4j is resynced from.
