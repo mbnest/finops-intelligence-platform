@@ -16,7 +16,7 @@ This repository works through an ambiguous, high-stakes architecture problem fro
 
 1. Reconstructs the **current-state** FinOps practice ([`FinOps Current State.md`](docs/FinOps%20Current%20State.md)).
 2. Identifies the **opportunities** a modern platform opens up ([`FinOps Opportunities.md`](docs/FinOps%20Opportunities.md)).
-3. Designs the **target platform** end to end: architecture, data model, ML and AI governance, ADRs, build-ready specifications, an operating model, and a migration plan, across fourteen cross-referenced documents.
+3. Designs the **target platform** end to end: architecture, data model, ML and AI governance, ADRs, build-ready specifications, an operating model, and a migration plan, across fifteen cross-referenced documents.
 4. Makes the agentic design explicit. A durable-workflow **Orchestrator** (Temporal) is kept separate from a policy-as-code **Guardrail Engine** (OPA), so no single component decides both what to do and whether it is safe. Cloud Workbench, the platform's one agentic surface, is a **bounded agent with an explicit graph** (pydantic-graph: typed nodes and edges, tools over MCP, and the ability to propose a governed action but never execute one), chosen over more autonomous frameworks such as LangGraph or CrewAI for the auditability a financial domain needs.
 5. **Builds a runnable slice of it** ([`demo/`](demo)), so the load-bearing claims are demonstrated in code instead of asserted in prose.
 
@@ -106,7 +106,7 @@ docs/
 ├── Solution_Architecture_PO_Auto_Draft.md                  Phase 5 extension: PO drafting on the same agent stack
 ├── Platform_Build_Specification.md                         Build-ready detail for every phase
 ├── References.md                                                Vendor documentation behind key claims
-└── Systems Engineer Prin.md                                     The job posting this responds to
+└── Systems Engineer Prin.md                                     The job posting this responds to (kept local, not committed)
 
 demo/                                                            Runnable slice of the design
 ├── README.md                                                    Quickstart, what to look for, stand-ins

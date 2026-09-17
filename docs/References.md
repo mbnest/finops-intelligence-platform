@@ -13,7 +13,7 @@ This document lists the vendor documentation behind the facts that drive decisio
 
 The document set draws on three kinds of source:
 
-1. **The job posting** ([Systems Engineer Prin.md](Systems%20Engineer%20Prin.md)): the role, the expected stack, and the organization's internal platforms (IDP, CMP, Internal Assistant).
+1. **The job posting** (`docs/Systems Engineer Prin.md`, kept local and not committed): the role, the expected stack, and the organization's internal platforms (IDP, CMP, Internal Assistant).
 2. **An informal conversation**: the facts labeled "known" in [FinOps Current State.md](FinOps%20Current%20State.md), such as Snowflake as the organization's data platform standard, the team lead's the end of the year retirement, APM ID coverage of about nearly all, and Datadog being in use. These can't be linked.
 3. **Vendor documentation**: the tables below.
 
