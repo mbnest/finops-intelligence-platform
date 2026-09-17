@@ -154,8 +154,8 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 | Component | Name | Purpose |
 |---|---|---|
 | Ingestion job | `job_apm_metadata_sync` | Pulls application metadata from the APM tool, scheduled daily |
-| Table | `bronze.apm_application_metadata` | `apm_id` (PK), `app_name`, `classification`, `owner_current`, `technical_contact_current` |
-| SCD Type 2 table | `silver.apm_owner_history` | `apm_id`, `owner`, `technical_contact`, `effective_start_date`, `effective_end_date` (null = current) |
+| Table | `bronze.apm_application_metadata` | `apm_id` (PK), `app_name`, `classification`, `owner_current`, `technical_contact_current`, `secondary_approver_current` |
+| SCD Type 2 table | `silver.apm_owner_history` | `apm_id`, `owner`, `technical_contact`, `secondary_approver`, `effective_start_date`, `effective_end_date` (null = current) |
 
 **Terraform state ingestion** (Data Foundations §4.1):
 
@@ -166,7 +166,7 @@ resolve_resource_identity(candidate_records: List[ResourceRecord]) -> ResolvedEn
 
 **Additional data quality checks (named rules)**:
 - `dq_check_apm_id_present` — tracks the percentage of resources with a resolved APM ID (target: matching or exceeding the ~nearly all baseline); trended over time as a governance KPI, not just a pass/fail gate.
-- `dq_check_owner_staleness` — flags `silver.apm_owner_history` records where `effective_start_date` exceeds a configurable staleness threshold (e.g., 6-12 months) without reconfirmation, distinct from `dq_check_apm_id_present`, this checks the volatile attribute, not the structural resource-to-app mapping.
+- `dq_check_owner_staleness` — flags `silver.apm_owner_history` records (owner, technical contact, or secondary approver) where `effective_start_date` exceeds a configurable staleness threshold (e.g., 6-12 months) without reconfirmation, distinct from `dq_check_apm_id_present`, this checks the volatile attributes, not the structural resource-to-app mapping. The Governed Automation Contract document's approval flow checks this before sending an approval request to either signer.
 
 ---
 
@@ -312,7 +312,7 @@ ROLLBACK: rollback_from_snapshot(action_payload) -> RollbackResult [Activity]
 |---|---|---|
 | Approval queue table (Postgres) | `action_approval_requests` | `request_id` (PK), `workflow_id` (Temporal workflow/run ID — an approve/reject decision Signals this specific workflow, so it has to be stored, not just implied), `origin` (`core_intelligence` \| `cloud_workbench` \| `self_serve_api`), `apm_id` (scopes which team's approvers can see/act on this request), `action_payload`, `risk_tier`, `contract_id` (FK → `contracts`, Governed Automation §3.4 — nullable until that entity exists), `status`, `approver_id`, `requested_at`, `decided_at` — operational state, not Snowflake (Governed Automation ADR-003) |
 | Approval service | `approval_queue_service` | Exposes review/approve/reject API for MEDIUM/HIGH tier actions; an approve/reject call sends a Temporal Signal to the corresponding workflow |
-| Contract table (Postgres) | `contracts` | Finalized against the Governed Automation Contract document: `contract_id` (PK), `apm_id`, `tier_scope` (LOW-only vs. full MEDIUM/HIGH), `pre_approved_actions`, `notification_requirements`, `change_window`, `rollback_guarantee`, `escalation_path`, `review_cadence`, `signed_by`, `signed_at` (populated from the signing ticket's resolution, Contract doc §3.2 — not a cryptographic signature), `status` (`draft`/`active`/`amended`/`revoked`/`expired`, Contract doc §3.1). Same OLTP access pattern as the approval queue (checked before allowing automation via `check_contract_exists`, Governed Automation §3.3 step 1), so Postgres by the same ADR-003 reasoning, not Snowflake |
+| Contract table (Postgres) | `contracts` | Finalized against the Governed Automation Contract document: `contract_id` (PK), `apm_id`, `tier_scope` (LOW-only vs. full MEDIUM/HIGH), `pre_approved_actions`, `notification_requirements`, `change_window`, `rollback_guarantee`, `escalation_path`, `review_cadence`, `owner_signed_by`, `owner_signed_at`, `secondary_approver_signed_by`, `secondary_approver_signed_at` (both pairs populated from the Teams approval card's own identity, Contract doc §3.2 — not a cryptographic signature; both required before `active`), `status` (`draft`/`active`/`amended`/`revoked`/`expired`, Contract doc §3.1). Same OLTP access pattern as the approval queue (checked before allowing automation via `check_contract_exists`, Governed Automation §3.3 step 1), so Postgres by the same ADR-003 reasoning, not Snowflake |
 | Audit table (Snowflake gold) | `gold.fact_action_audit` | `request_id`, `action_payload`, `risk_tier`, `origin`, `contract_id`, `outcome`, `executed_at`, `rolled_back` (bool) — synced from Postgres/Temporal history once a workflow completes, for cross-platform reporting (Governed Automation ADR-003); `contract_id` added so FR4's audit trail actually links to "the agreement that authorized it," not just the APM ID |
 
 **Policy-as-code (Open Policy Agent, enforced independently of agent reasoning)**:
@@ -366,6 +366,7 @@ OpenAPI spec maintained at `openapi.yaml`, auto-published to an internal develop
 | Workbench orchestrator | `chart-cloud-workbench-orchestrator` | The pydantic-graph-based orchestration service |
 | Orchestrator | `chart-guardrail-orchestrator` | Governed Automation's Temporal-workflow-based durable orchestration service (Section 6) — previously had no deployable of its own, only the `modules/temporal-cluster` infra module above |
 | Guardrail Engine | `chart-guardrail-engine` | The OPA-based policy-decision service (Section 6) the Orchestrator calls for risk classification — previously had no deployable or infra module at all |
+| Contract approval bot | `chart-contract-approval-bot` | A Teams bot/app (Governed Automation Contract doc, ADR-3) — sends a dual-approval Adaptive Card to the APM Owner and Secondary Approver (`bronze.apm_application_metadata`), records each click's Teams identity as `owner_signed_by`/`secondary_approver_signed_by` on `contracts` (Section 6). Not a general e-signature platform, purpose-built for this one action |
 
 **CI/CD pipeline**: `pipeline-cloud-workbench-ci`, stages: `test` (unit/integration) → `eval-gate` (runs `eval_set_cost_queries.yaml` against any prompt/retrieval/model change) → `deploy-staging` → `canary-prod` (10/50/100 traffic increments per the staged-rollout pattern).
 
