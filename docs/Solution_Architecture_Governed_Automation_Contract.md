@@ -24,6 +24,7 @@ Without this entity, Governed Automation's own FR3 is unenforceable — there is
 - FR4: Support a contract lifecycle — draft, active, amended, revoked, expired — with every transition audited (who, when, why).
 - FR5: An in-flight proposed action that started under an active contract completes under the terms that were active when it started; a revocation or amendment takes effect for actions proposed after it, not ones already running.
 - FR6: Where the contract's change-window constraint applies (MEDIUM-tier timing), consult the change-management/CAB calendar it references — system of record not yet confirmed with the organization (see §3.4 and ADR-4).
+- FR7: Escalate a significant finding (a Core Intelligence recommendation, a Cloud Workbench Expansion push signal, or a self-initiated what-if proposal) that receives no explicit disposition — accepted, rejected, or actioned — within a defined SLA window, per a dollar-savings or risk/config-severity threshold (§3.6). Escalation always requires FinOps/platform team review and approval of the underlying suggestion **before** a Change Request is generated — a lapsed SLA never auto-generates a CR without a human confirming the suggestion is worth escalating first.
 
 ### 2.3 Non-functional requirements (inferred)
 
@@ -81,11 +82,30 @@ Runs as the first Activity in the Orchestrator's workflow (Governed Automation �
 
 ### 3.4 Change-window / CAB integration
 
-FR6's change-window constraint needs a real system of record to check against. **Assumed**: a CAB/change-management process exists (Governed Automation §3.5 already adopted this at the organization's organizational scale), and it lives in **ServiceNow's Change Management module** — the same tool believed, not confirmed, to be the organization's ITSM system elsewhere in this platform (Data Foundations §4.5). The tool choice matters as much as the CAB assumption itself: a change-window check against the wrong system is a check against nothing. `change_window` on the contract record (Build Specification §6) references a ServiceNow change-request/blackout-calendar lookup, queried at proposal time by the same Orchestrator step that already consults the contract (§3.3). Still not confirmed with the organization — carried forward as an assumption to validate, not a resolved fact, since it's stacked on top of the ServiceNow-as-ITSM-tool assumption rather than independently confirmed.
+FR6's change-window constraint needs a real system of record to check against. **Assumed**: a CAB/change-management process exists (Governed Automation §3.5 already adopted this at the organization's organizational scale), backed by a **CAB/ITSM system** — the same platform this document set already assumes handles ticketing/paging elsewhere (Data Foundations §4.5). `change_window` on the contract record (Build Specification §6) references that system's change-request/blackout-calendar lookup, queried at proposal time by the same Orchestrator step that already consults the contract (§3.3). Which specific product sits behind "CAB/ITSM system" is an implementation detail for whoever builds this, not a design dependency this document carries.
 
 ### 3.5 Revocation and amendment handling
 
 Per FR5: revocation or amendment updates the contract's state for any *future* `check_contract_exists` lookup, but doesn't reach into an already-running Temporal workflow. This avoids a real failure mode — interrupting a partially-executed infrastructure action mid-flight because a contract changed a moment ago is a worse outcome than letting it finish under the terms it validly started under.
+
+### 3.6 Disposition SLA and escalation
+
+The gap this closes: today, a significant finding that isn't auto-executed (HIGH tier, or a vertical declines to act) is logged and relevant parties are notified — and then nothing necessarily happens. FR7 turns silence into a forcing function without removing human judgment from the decision.
+
+**Lifecycle** (tracked per finding, independent of the contract's own lifecycle in §3.1):
+
+| State | Meaning | Transitions in |
+|---|---|---|
+| `pending_disposition` | Finding surfaced (recommendation, push signal, or what-if proposal), notified via the standard Teams + ITSM channels (Data Foundations §4.5) | Initial state, on surfacing |
+| `escalation_review` | The SLA window lapsed with no explicit accept/reject/action decision; queued for FinOps/platform team review | From `pending_disposition`, automatic on SLA lapse |
+| `escalation_approved` | The platform team confirmed the finding is worth escalating | From `escalation_review` |
+| `escalation_declined` | The platform team reviewed and decided not to escalate (e.g., stale, already superseded, not actually actionable) | From `escalation_review`; this **is** a disposition — the SLA's purpose is forcing a decision, not forcing action |
+| `cr_generated` | A Change Request has been submitted into the CAB/ITSM system (§3.4) for CAB's own approval process | From `escalation_approved` |
+| `dispositioned` | Terminal state — finding was actioned, explicitly rejected, or declined at escalation review | From any state once a decision is recorded |
+
+**The threshold** (what counts as "significant," per FR7): a dollar-savings amount or a risk/config-severity flag, defined per contract where a specific application team has agreed to different terms (§2.2 FR1), falling back to a platform-wide default otherwise — the same "contract can request stricter, never looser" principle FR3 already establishes for risk tiering, applied here to escalation sensitivity.
+
+**The human gate is deliberate, not incidental.** A lapsed SLA alone doesn't generate a CR — it routes the finding to the FinOps/platform team via the same Teams approval-card mechanism §3.2 already uses, and only their approval generates one. This prevents a stale or low-quality finding from automatically consuming CAB's own review capacity; it mirrors Governed Automation's own HIGH-tier principle (mandatory human approval, no exception) applied to a different kind of consequential action — submitting something into an external governance process, not executing infrastructure change directly.
 
 ---
 
@@ -109,11 +129,17 @@ Per FR5: revocation or amendment updates the contract's state for any *future* `
 - *Alternatives considered*: A standalone web-form (an earlier version of this decision), rejected on reconsideration — it would need its own login/auth build, where a Teams card inherits identity from the platform already in use. A single-signer approval, rejected once dual control was identified as a real audit/security/GRC need, not just a nice-to-have. A generic ticket queue, rejected — doesn't name who specifically approves. A dedicated e-signature platform, rejected as unnecessary for this volume.
 - *Consequences*: Still needs a Teams bot/app registration to send and process Adaptive Card actions (a build item, just a different one than a standalone web-form) — no new deployable in the sense of a hosted webpage, but not zero-cost either. Reliability now depends on two fields' freshness (`dq_check_owner_staleness` for both roles) instead of one. An unactioned `draft` needs a reminder cadence through the same Teams channel, or it can sit indefinitely — a safe failure mode (stays advisory) but a real adoption-friction risk if nothing nudges a stalled approval.
 
-**ADR-4: Assume ServiceNow's Change Management module as the CAB system of record**
-- *Context*: FR6 needs a real calendar to check against. Governed Automation §3.5 already assumes a CAB/change-management process exists at the organization's scale; ServiceNow is separately believed (not confirmed) to be the organization's ITSM tool elsewhere in this platform (Data Foundations §4.5).
-- *Decision*: Assume ServiceNow's Change Management module specifically, rather than leaving the system of record unnamed. The tool matters as much as the CAB assumption itself — a change-window check against an unspecified system isn't buildable.
-- *Alternatives considered*: Leaving this fully open with no named tool (this document's earlier position), rejected on reconsideration — an assumption that's wrong is correctable once the organization confirms; an assumption that's never made leaves nothing concrete to build against or correct.
-- *Consequences*: This stacks one unconfirmed assumption (ServiceNow as ITSM tool) with another (ServiceNow's Change Management module specifically holds the CAB calendar) — both need the organization validation, and a wrong answer on either invalidates §3.4's integration point. Flagged as an assumption to validate, not a resolved fact.
+**ADR-4: Assume a CAB/ITSM system of record for the change-window check, rather than naming a specific product**
+- *Context*: FR6 needs a real calendar to check against. Governed Automation §3.5 already assumes a CAB/change-management process exists at the organization's scale, backed by the same CAB/ITSM system this platform assumes elsewhere (Data Foundations §4.5).
+- *Decision*: Design §3.4's integration against a generic CAB/ITSM system, referenced by that role rather than a specific product name — the integration point matters more than which vendor sits behind it.
+- *Alternatives considered*: Naming a specific real product by guess, rejected — no evidence points to any one product, and guessing wrong is worse than staying generic. Leaving this fully open with no system named at all, rejected — the integration point (a change-request/blackout-calendar lookup) is still worth designing even generically.
+- *Consequences*: §3.4's design holds regardless of which specific product the organization actually runs; only the concrete lookup call changes once that's known, not the architecture around it.
+
+**ADR-5: Require human review and approval before a lapsed finding generates a Change Request — never auto-generate on SLA lapse alone**
+- *Context*: FR7's disposition SLA exists to turn silent inaction into a forcing function, but a purely automatic escalation (SLA lapses → CR auto-submitted) risks flooding CAB's own review queue with stale, superseded, or low-quality findings nobody has actually looked at.
+- *Decision*: An SLA lapse routes the finding to the FinOps/platform team for review (`escalation_review`, §3.6); only their explicit approval generates a CR. A decline is itself a valid, terminal disposition — the mechanism's purpose is forcing a decision, not forcing action.
+- *Alternatives considered*: Auto-generating a CR directly on SLA lapse, rejected — treats CAB's queue as a dumping ground for unreviewed findings and removes the one thing that made escalation credible: a human confirmed it's actually worth CAB's time. Skipping escalation entirely and relying on the original notification alone, rejected — that's the status quo this ADR exists to fix.
+- *Consequences*: One more human touchpoint per escalated finding, on top of the original notification — an intentional cost, since the alternative is either noise in CAB's queue or the original "advisement and nothing happens" problem persisting unchanged.
 
 ---
 
@@ -126,3 +152,5 @@ Per FR5: revocation or amendment updates the contract's state for any *future* `
 **Tier scope** — A contract's declared coverage: LOW-only automation, or full MEDIUM/HIGH-tier autonomy. Distinct from a tier *upgrade* request (FR3), which asks for stricter-than-default handling on top of whatever scope is granted.
 
 **Dual control (Owner + Secondary Approver)** — This document's requirement that both the APM Owner and APM Secondary Approver (Data Foundations §4.4) independently approve a contract before it activates. Deliberately not a backup/redundancy pattern (either signing is not sufficient) — the point is two independent sign-offs, for the same audit/security/GRC reasons this platform requires human approval at all for HIGH-tier actions.
+
+**Disposition SLA** — FR7's mechanism: a significant finding with no explicit accept/reject/action decision within a defined window escalates to FinOps/platform team review, and only their approval generates a Change Request. Turns silent inaction into a forced decision, without forcing action itself — a decline is a valid outcome.

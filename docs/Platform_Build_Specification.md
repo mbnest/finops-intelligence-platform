@@ -76,7 +76,7 @@ Mediation is implemented here, as the bronze-to-silver transform within Snowflak
 | `gold.dim_tag` | Dimension | `tag_key`, `tag_value`, `resource_id` (FK) | Supports metadata filtering |
 | `gold.fact_anomaly` | Fact | `anomaly_id`, `resource_id`, `detected_date`, `severity`, `model_version`, `contributing_factors` (JSON) | Written by Core Intelligence (MLOps Pipeline doc) |
 | `gold.fact_recommendation` | Fact | `recommendation_id`, `resource_id`, `type`, `estimated_savings_usd`, `status`, `model_version` | Written by Core Intelligence |
-| `gold.dim_rate_card` | Dimension | `rate_card_id` (PK), `provider`, `resource_type`, `contracted_unit_rate`, `effective_start_date`, `effective_end_date` | Ingested vendor rate data, not derived — source system not yet confirmed with the organization (Data Foundations §4.1) |
+| `gold.dim_rate_card` | Dimension | `rate_card_id` (PK), `provider`, `resource_type`, `contracted_unit_rate`, `effective_start_date`, `effective_end_date` | Ingested vendor rate data, not derived (Data Foundations §4.1) |
 | `gold.fact_bill_verification` | Fact | `verification_id`, `cost_fact_id` (FK), `confidence_score`, `evidence` (JSON), `status`, `model_version` | Written by Bill Verification's reconciliation model |
 
 **Governance/RBAC (Snowflake Horizon)**:
@@ -313,6 +313,7 @@ ROLLBACK: rollback_from_snapshot(action_payload) -> RollbackResult [Activity]
 | Approval queue table (Postgres) | `action_approval_requests` | `request_id` (PK), `workflow_id` (Temporal workflow/run ID — an approve/reject decision Signals this specific workflow, so it has to be stored, not just implied), `origin` (`core_intelligence` \| `cloud_workbench` \| `self_serve_api`), `apm_id` (scopes which team's approvers can see/act on this request), `action_payload`, `risk_tier`, `contract_id` (FK → `contracts`, Governed Automation §3.4 — nullable until that entity exists), `status`, `approver_id`, `requested_at`, `decided_at` — operational state, not Snowflake (Governed Automation ADR-003) |
 | Approval service | `approval_queue_service` | Exposes review/approve/reject API for MEDIUM/HIGH tier actions; an approve/reject call sends a Temporal Signal to the corresponding workflow |
 | Contract table (Postgres) | `contracts` | Finalized against the Governed Automation Contract document: `contract_id` (PK), `apm_id`, `tier_scope` (LOW-only vs. full MEDIUM/HIGH), `pre_approved_actions`, `notification_requirements`, `change_window`, `rollback_guarantee`, `escalation_path`, `review_cadence`, `owner_signed_by`, `owner_signed_at`, `secondary_approver_signed_by`, `secondary_approver_signed_at` (both pairs populated from the Teams approval card's own identity, Contract doc §3.2 — not a cryptographic signature; both required before `active`), `status` (`draft`/`active`/`amended`/`revoked`/`expired`, Contract doc §3.1). Same OLTP access pattern as the approval queue (checked before allowing automation via `check_contract_exists`, Governed Automation §3.3 step 1), so Postgres by the same ADR-003 reasoning, not Snowflake |
+| Finding escalation table (Postgres) | `finding_escalations` | Contract doc §3.6 (FR7, ADR-5): `escalation_id` (PK), `finding_id` (FK to `gold.fact_recommendation`/`gold.fact_anomaly`), `finding_source` (`core_intelligence`/`cloud_workbench_expansion_push`/`what_if_proposal`), `apm_id`, `threshold_type` (`dollar`/`risk_severity`), `threshold_value`, `surfaced_at`, `sla_deadline`, `status` (`pending_disposition`/`escalation_review`/`escalation_approved`/`escalation_declined`/`cr_generated`/`dispositioned`), `reviewed_by`, `reviewed_at`, `cr_reference` (the CAB/ITSM system's CR number, populated only after `escalation_approved`). Same OLTP reasoning as `contracts`/`action_approval_requests` |
 | Audit table (Snowflake gold) | `gold.fact_action_audit` | `request_id`, `action_payload`, `risk_tier`, `origin`, `contract_id`, `outcome`, `executed_at`, `rolled_back` (bool) — synced from Postgres/Temporal history once a workflow completes, for cross-platform reporting (Governed Automation ADR-003); `contract_id` added so FR4's audit trail actually links to "the agreement that authorized it," not just the APM ID |
 
 **Policy-as-code (Open Policy Agent, enforced independently of agent reasoning)**:
@@ -397,6 +398,158 @@ This table also serves as Cloud Workbench's long-term memory (Cloud Workbench AD
 
 ---
 
-## 10. What This Specification Deliberately Omits
+## 10. Bill Verification (Phase 4)
+
+Per Bill Verification ADR-1, this reuses MLOps Pipeline's feature store, model registry, eval gate, and drift-monitoring infrastructure directly — the jobs below are one more model family registered in that same pipeline, not a parallel one.
+
+**Jobs (Snowpark ML, orchestrated per MLOps Pipeline §2.4–§2.6)**:
+
+| Job | Name | Trigger | Purpose |
+|---|---|---|---|
+| Feature engineering | `job_build_bill_verification_features` | Downstream of `job_gold_aggregate_cost` (Section 3) | Computes Bill Verification §3.2's features (`rate_delta_pct`, `historical_rate_stability`, `usage_qty_variance`, `rate_card_coverage`, `dollar_impact`) from `gold.dim_rate_card` and `gold.fact_cost_daily`, writes to the shared Snowflake Feature Store |
+| Model training | `job_train_bill_verification_model` | Scheduled retrain cadence, same as MLOps Pipeline's other model families | Trains the confidence-scoring model against historical human-verification outcomes (Bill Verification §3.3), registers a candidate version in the Snowflake Model Registry |
+| Eval gate | `job_eval_bill_verification_model` | Post-training, before promotion | Evaluates the candidate model against a held-out validation set; blocks promotion on failure (MLOps Pipeline §2.4) |
+| Scoring | `job_score_bill_verification` | New/updated rows in `gold.fact_cost_daily` | Runs the current registry-promoted model against new invoiced line items, calling `score_line_item()` (below) for each, writing results to `bill_verification_reviews` (Postgres) |
+| Drift monitoring | `job_monitor_bill_verification_drift` | Scheduled, Evidently AI | Same tooling/cadence as MLOps Pipeline's other model families (Bill Verification §3.1); drift detected re-triggers `job_train_bill_verification_model` |
+
+**Function signatures (specification, not implementation)**:
+```
+score_line_item(line_item: CostLineItem, rate_card_entry: Optional[RateCardEntry]) -> BillVerificationScore
+  Purpose: Produce a confidence score plus structured evidence for one invoiced
+  line item (Bill Verification §3.2-§3.3).
+  Output: BillVerificationScore {
+    confidence_score: float,
+    evidence: {rate_card_match, historical_comparison, delta_explanation},
+    dollar_impact: float,          # from gold.fact_cost_daily, not a model output
+  }
+  On no matching RATE_CARD entry (coverage gap): still returns a score, with
+  evidence explicitly noting the gap rather than treating it as a missing input.
+
+route_verification_result(score: BillVerificationScore) -> RoutingDecision
+  Purpose: FR2's hard rule — auto-clear requires high confidence AND low dollar
+  impact; either condition failing routes to human review, regardless of the
+  other (Bill Verification ADR-2).
+  Output: RoutingDecision enum: AUTO_CLEAR | HUMAN_REVIEW.
+```
+
+**Tables**:
+
+| Table | Type | Key columns | Notes |
+|---|---|---|---|
+| `bill_verification_reviews` (Postgres) | Operational queue | `review_id` (PK), `cost_fact_id` (FK), `confidence_score`, `dollar_impact`, `evidence` (JSON), `routing_reason` (`low_confidence`/`high_impact`/`both`/`auto_cleared`), `status` (`pending_review`/`reviewed_cleared`/`reviewed_flagged`/`auto_cleared`), `reviewer_id`, `requested_at`, `reviewed_at` | Same OLTP-for-operational-state reasoning as Governed Automation's `action_approval_requests`/`contracts` (Section 6, Data Foundations ADR-003) — this is where the FinOps/platform team actually works the queue |
+| `gold.fact_bill_verification` (Snowflake) | Fact | see Section 3 | Final result only, one row per line item once its status resolves — synced from `bill_verification_reviews` for reporting/Cloud Workbench consumption; not the operational queue itself |
+
+**Review service**: `bill_verification_review_service` — exposes list/claim/decide endpoints against `bill_verification_reviews` for the FinOps/platform team (Bill Verification FR3), scoped to `role_platform_admin` (Section 3's RBAC roles). A decision writes the final row to `gold.fact_bill_verification` with `status = 'reviewed_cleared'` or `'reviewed_flagged'`, the reviewer's identity, and a timestamp — mirroring Section 6's `approval_queue_service` pattern, applied to a financial rather than infrastructure decision.
+
+**Observability**: no bill-verification-specific alerting path — routes through the platform's shared Datadog/Teams/ITSM baseline (Data Foundations §4.5), same as every other model family (Bill Verification §3.1).
+
+---
+
+## 11. PO Auto-Draft (Phase 5 extension)
+
+Per PO Auto-Draft ADR-1, this reuses Cloud Workbench's agentic stack (Section 5) directly — pydantic-graph, MCP, Azure OpenAI — rather than Governed Automation's Orchestrator, since drafting a document isn't a risk-tiered infrastructure action.
+
+**pydantic-graph nodes** (workflow steps, mirroring Section 5's node table pattern):
+
+| Node | Name | Function |
+|---|---|---|
+| Gather cleared records | `node_gather_cleared_records` | First node. Pulls `gold.fact_bill_verification` records for a vendor/period where `status` is `auto_cleared` or `reviewed_cleared` (FR1) — never pending or flagged records |
+| Draft PO | `node_draft_po` | Calls `draft_po()` (below) to fill a fixed PO schema from the gathered records (FR2, §3.2) |
+| Verify draft | `node_verify_draft` | Calls `verify_po_draft()` (below); on failure, the draft never proceeds to `node_route_approval` (FR3, ADR-2) |
+| Route for approval | `node_route_approval` | Sends a Teams Adaptive Card to the FinOps/platform team (same mechanism as Section 6's Contract approval card) |
+| Handle decision | `node_handle_decision` | On approval, calls `post_po_to_erp()`; on rejection, falls back to manual PO entry and records the reviewer's stated reason (FR5/FR6, §3.4) |
+
+**Function signatures (specification, not implementation)**:
+```
+draft_po(cleared_records: List[BillVerificationRecord]) -> PODraft
+  Purpose: Fill a fixed PO schema from Bill Verification's cleared line items
+  (PO Auto-Draft FR2, §3.2) — the model populates a defined structure, it
+  doesn't compose free text.
+  Output: PODraft {
+    vendor, billing_period, line_items: List[LineItem], total,
+    cost_center, account_id,
+  }
+
+verify_po_draft(draft: PODraft) -> VerificationResult
+  Purpose: Deterministic structural check — every field must resolve to a
+  specific gold.fact_bill_verification / gold.dim_rate_card / gold.dim_account
+  record (PO Auto-Draft FR3, ADR-2), not a second LLM-judge pass.
+  Output: VerificationResult { passed: bool, unresolved_fields: List[str] }
+  On fail: draft is never shown to a human (PO Auto-Draft §3.3).
+
+post_po_to_erp(draft: PODraft, approval: ApprovalRecord) -> PostResult
+  Purpose: Submit the approved PO to the organization's procurement/ERP system via API
+  (PO Auto-Draft FR5, ADR-4).
+  Output: PostResult { erp_reference: str } on success.
+  If no API is available: returns a ManualEntryHandoff instead — the verified
+  draft is packaged for manual entry, not posted directly (PO Auto-Draft §3.5).
+```
+
+**Tables**:
+
+| Table | Type | Key columns | Notes |
+|---|---|---|---|
+| `po_drafts` (Postgres) | Operational | `draft_id` (PK), `vendor`, `billing_period`, `line_items` (JSON), `total`, `cost_center`, `account_id`, `verification_status` (`passed`/`failed`), `verification_detail` (JSON), `approval_status` (`pending_review`/`approved`/`rejected`), `reviewer_id`, `decided_at`, `rejection_reason`, `post_status` (`posted`/`manual_handoff`/`not_applicable`), `erp_reference` (nullable) | Same OLTP-for-operational-state reasoning as `bill_verification_reviews` (Section 10), `action_approval_requests`/`contracts` (Section 6, Data Foundations ADR-003) |
+| `gold.fact_po_draft` (Snowflake) | Fact | `draft_id`, `vendor`, `billing_period`, `total`, `approval_status`, `post_status`, `decided_at` | Synced from `po_drafts` once a draft resolves, for reporting — not the operational store itself, same pattern as `gold.fact_bill_verification` (Section 10) |
+
+**Approval service**: `po_draft_approval_service` — exposes list/approve/reject endpoints against `po_drafts` for the FinOps/platform team (FR4), scoped to `role_platform_admin` (Section 3's RBAC roles). A rejection captures the reviewer's stated reason, feeding a future eval set for the drafting template (PO Auto-Draft §3.4), the same feedback-capture pattern Cloud Workbench's eval set already uses (Section 9).
+
+**Observability**: no capability-specific alerting path — pending drafts and verification failures route through the platform's shared Datadog/Teams/ITSM baseline (Data Foundations §4.5), same as every other phase.
+
+---
+
+## 12. Cloud Workbench Expansion — Push/Pull Channels (Phase 5 extension)
+
+**Push delivery jobs** (Cloud Workbench Expansion §3.2, ADR-1 — staged, not launched uniformly):
+
+| Job | Name | Trigger | Purpose |
+|---|---|---|---|
+| Push to IDP | `job_push_signals_idp` | Scheduled, post gold-aggregate (Section 3) | Stage 1 — pushes cloud-optimization signals (`gold.fact_recommendation` where type is rightsizing/RI-SP) into IDP via `push_signal()` |
+| Push to CMP | `job_push_signals_cmp` | Scheduled, post gold-aggregate | Stage 2 — pushes Kubernetes/container-specific findings (`gold.fact_anomaly`/`fact_recommendation` filtered to container resource types) into CMP |
+| Push to Internal Assistant | `job_push_signals_internal_assistant` | Scheduled, gated on Internal Assistant's API surface being confirmed | Stage 3 — pushes both signal types into Internal Assistant; not yet active (Cloud Workbench Expansion §3.2) |
+
+**Function signature (specification, not implementation)**:
+```
+push_signal(signal: SignalRecord, target: Literal["idp", "cmp", "internal_assistant"]) -> PushResult
+  Purpose: Deliver one cost/anomaly/recommendation/action-outcome signal to a
+  target tool's own API (Cloud Workbench Expansion §3.2).
+  Output: PushResult { delivered: bool, target_reference: Optional[str] }
+  On failure: routes through the shared Datadog/Teams/ITSM baseline (Data
+  Foundations §4.5), not a push-specific alerting path.
+
+run_what_if_projection(scenario: WhatIfScenario) -> ProjectionResult
+  Purpose: Project a hypothetical change's impact using Core Intelligence's
+  existing rightsizing/RI-SP models (MLOps Pipeline §2.3), parameterized
+  against scenario inputs rather than observed usage (Cloud Workbench
+  Expansion FR3, ADR-3) — not a new model family.
+  Input: WhatIfScenario { resource_ref, proposed_change, vertical_id }
+  Output: ProjectionResult { projected_savings_usd, confidence, model_version }
+  Not persisted beyond the session — an exploratory projection, not a
+  recommendation record. Only a scenario submitted via propose_action becomes
+  a persisted proposal (Section 6's action_approval_requests, same as any
+  other origin).
+```
+
+**Pull workbench (Streamlit-in-Snowflake, Cloud Workbench Expansion ADR-2)**:
+
+| Component | Name | Purpose |
+|---|---|---|
+| App | `app_cloud_workbench_whatif` | The pull surface's UI, Streamlit-in-Snowflake |
+| Projection tool | `run_what_if_projection` | MCP tool, above |
+| Action-proposal binding | `propose_action` (pull-scoped) | Same MCP tool Section 6 already defines, bound into this app's own tool context (Cloud Workbench Expansion ADR-4) — **not** a change to `node_resolve_persona`'s chat tool-set rules (Section 5), which still excludes Vertical sessions from `propose_action` in chat |
+
+**Persona-to-tool-set addition** (extends Section 5's table; this row applies to the pull workbench surface only):
+
+| Persona | Surface | Tools available |
+|---|---|---|
+| Vertical | Pull workbench (`app_cloud_workbench_whatif`) | `get_peer_benchmark` (FR5, extended here from Platform-only), `run_what_if_projection`, `propose_action` (pull-scoped) — none of these are granted to a Vertical session in Cloud Workbench chat (Section 5's table, unchanged) |
+
+**`finding_escalations` extension**: no new table (Cloud Workbench Expansion ADR-5) — `finding_source` (Section 6) gains two values, `cloud_workbench_expansion_push` and `what_if_proposal`, alongside `core_intelligence`.
+
+**Observability**: no capability-specific alerting path — push failures and pull-workbench errors route through the shared Datadog/Teams/ITSM baseline (Data Foundations §4.5).
+
+---
+
+## 13. What This Specification Deliberately Omits
 
 Per the framing of this artifact: no SQL DDL, no dbt model SQL or Snowpark Python implementation code, no actual Terraform HCL, no pydantic-graph Python node/edge definitions. An implementing engineer would write all of that against this specification, table names, column lists, function signatures, and policy names given here should be sufficient to build consistently without inventing the structure from scratch.

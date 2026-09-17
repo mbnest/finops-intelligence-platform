@@ -2,7 +2,7 @@
 
 Phase 4 of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md). Bill verification originated as a problem statement in [Solution_Architecture_MLOps_Pipeline.md](Solution_Architecture_MLOps_Pipeline.md) §1.1 — this document gives it the dedicated architectural treatment that document deliberately deferred, per the Solution Overview's Sub-Document Index and ADR-M4 there: extend the MLOps pattern (feature store, eval gate, versioned model) rather than invent a separate one.
 
-Requirements and specifics below are **inferred** from `FinOps Current State.md`'s description of today's manual reconciliation process and `FinOps Opportunities.md` §2d, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §3 (gold-layer schema only — a dedicated build section, matching §5/§6's pattern for Cloud Workbench/Governed Automation, is not yet added).
+Requirements and specifics below are **inferred** from `FinOps Current State.md`'s description of today's manual reconciliation process and `FinOps Opportunities.md` §2d, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §3 (gold-layer schema) and §10 (jobs, function signatures, review-queue table, matching §5/§6's pattern for Cloud Workbench/Governed Automation).
 
 ---
 
@@ -37,7 +37,7 @@ Following bill verification and contract association, POs are entered into the r
 
 ### 2.4 Non-goals (inferred)
 
-- **Not PO auto-drafting.** Bill Verification's confidence-scored output is a prerequisite input for a future PO-drafting capability, not part of the same pipeline. That capability — sketched components: a drafting template/skill, the verified line-item data, GenAI to produce a proposed PO, a verifier of the produced output, a human approval step, a database for output/approvals/verifications, and (if possible) a means to post the approved PO to the relevant system — is scoped separately (Solution Overview's Sub-Document Index, "PO Auto-Draft," not yet designed) and most naturally built as a Cloud Workbench-adjacent tool once that agentic infrastructure exists.
+- **Not PO auto-drafting.** Bill Verification's confidence-scored output is a prerequisite input for a future PO-drafting capability, not part of the same pipeline. That capability is designed separately, downstream of this document — see [Solution_Architecture_PO_Auto_Draft.md](Solution_Architecture_PO_Auto_Draft.md).
 - Not a contract-management system. This document consumes contracted rate data (Data Foundations §4.1); it doesn't manage, author, or negotiate contracts.
 - Not a replacement for human judgment on ambiguous or high-dollar-impact items — FR2's hard rule guarantees a human sees those regardless of model confidence.
 
@@ -131,10 +131,10 @@ One wrinkle specific to this domain, worth naming rather than silently inheritin
 - *Consequences*: No new team's RBAC/notification integration to design; FR3's queue reuses whatever access the FinOps/platform team already has elsewhere in this platform.
 
 **ADR-4: Treat vendor rate data as net-new ingested data, not an assumed-existing integration**
-- *Context*: Reconciliation has nothing to check against without contracted rates in queryable form; no existing the organization system is known to expose this.
-- *Decision*: Model vendor rate data as a new Data Foundations source (§4.1's `RATE_CARD` addition) — functional data required for this model to work, not a reference/lookup table treated as an afterthought.
-- *Alternatives considered*: Assuming an existing procurement/contract-management system already exposes this in integrable form, rejected — no such system is confirmed, and assuming one invites building against a system that may not exist as imagined. Deferring the whole document until that source is confirmed, rejected — the architecture around it (feature engineering, model, routing) doesn't depend on exactly which system it comes from, only that it exists in gold.
-- *Consequences*: Ingestion pipeline/source-system specifics for rate data remain an open item pending the organization confirmation (see Data Foundations §4.1's note); the model architecture itself isn't blocked on that answer.
+- *Context*: Reconciliation has nothing to check against without contracted rates in queryable form.
+- *Decision*: Model vendor rate data as a new Data Foundations source (§4.1's `RATE_CARD` addition) — functional data required for this model to work, ingested into gold and the knowledge graph like any other source, not a reference/lookup table treated as an afterthought.
+- *Alternatives considered*: Deferring the whole document until a specific source system is named, rejected — the architecture around it (feature engineering, model, routing) doesn't depend on exactly which system the data comes from, only that it exists in gold.
+- *Consequences*: The data is required either way; which upstream system ultimately feeds the ingestion job is an implementation detail for whoever builds it, not a design dependency this document carries.
 
 ---
 

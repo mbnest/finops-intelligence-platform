@@ -2,13 +2,13 @@
 
 Phase 5 extension of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md), downstream of [Solution_Architecture_Bill_Verification.md](Solution_Architecture_Bill_Verification.md) (Phase 4) — a distinct capability, not part of it. Bill Verification's confidence-scored, evidence-attached reconciliation is what makes drafting a PO from that data defensible; this document is the drafting itself. Most naturally built as a Cloud Workbench-adjacent tool, reusing that phase's agentic stack rather than Governed Automation's deterministic Orchestrator, since this is a GenAI drafting task, not a risk-tiered infrastructure action.
 
-Requirements and specifics below are **inferred** from `FinOps Current State.md`'s description of today's PO process and conversation with the document's author, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) (no dedicated section yet — see Review Status).
+Requirements and specifics below are **inferred** from `FinOps Current State.md`'s description of today's PO process and conversation with the document's author, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §11 (pydantic-graph nodes, function signatures, `po_drafts` operational table, `po_draft_approval_service`).
 
 ---
 
 ## 1. Executive Summary
 
-Today, "following bill verification and contract association, POs are entered into the relevant system" (`FinOps Current State.md`) — a manual re-keying step even after Bill Verification has already done the hard reconciliation work. This document drafts that PO directly from Bill Verification's already-cleared line items: a GenAI step produces a structured draft, a deterministic verifier checks every field traces back to a real gold-layer record before a human ever sees it, and the FinOps/platform team approves or rejects every single draft — there is no auto-post path, regardless of confidence or dollar amount. On approval, the PO is submitted to the organization's procurement/ERP system via API; which system that is remains unconfirmed (§2.4, ADR-4).
+Today, "following bill verification and contract association, POs are entered into the relevant system" (`FinOps Current State.md`) — a manual re-keying step even after Bill Verification has already done the hard reconciliation work. This document drafts that PO directly from Bill Verification's already-cleared line items: a GenAI step produces a structured draft, a deterministic verifier checks every field traces back to a real gold-layer record before a human ever sees it, and the FinOps/platform team approves or rejects every single draft — there is no auto-post path, regardless of confidence or dollar amount. On approval, the PO is submitted to the organization's procurement/ERP system via API (§2.4, ADR-4); if that system doesn't expose one, this last step becomes a structured draft handed off for manual entry instead — the drafting and verification value holds either way.
 
 ## 2. Business Context & Requirements
 
@@ -22,7 +22,7 @@ Bill Verification (Phase 4) produces cleared, evidenced line items (`gold.fact_b
 - FR2: Generate a structured PO draft (vendor, billing period, line items, total, cost-center/account allocation) via a fixed drafting template, not free-form generation — the model fills a defined schema, it doesn't compose a document from scratch.
 - FR3: Verify the draft deterministically before any human sees it — every field must trace back to a specific `gold.fact_bill_verification`/`gold.dim_rate_card`/`gold.dim_account` record. A field that doesn't trace to source data fails verification, it isn't silently passed through on model confidence.
 - FR4: Require FinOps/platform team approval on **every** draft that passes verification — no auto-post path exists at any confidence or dollar level. This is a deliberate difference from Governed Automation's LOW-tier autonomy and Bill Verification's auto-clear path (§2.4).
-- FR5: On approval, submit the PO to the organization's procurement/ERP system via API (system unconfirmed, §2.4/ADR-4). On rejection, fall back to today's existing manual PO-entry process and capture the reviewer's stated reason as feedback (§3.4).
+- FR5: On approval, submit the PO to the organization's procurement/ERP system via API, assuming one exists (§2.4/ADR-4); if it doesn't, hand off the verified draft for manual entry instead. On rejection, fall back to today's existing manual PO-entry process and capture the reviewer's stated reason as feedback (§3.4).
 - FR6: Every draft, verification result, and approval/rejection decision is stored and auditable, with a queryable copy synced to gold for reporting — same discipline as every other phase's audit trail.
 
 ### 2.3 Non-functional requirements (inferred)
@@ -49,7 +49,7 @@ flowchart LR
     DRAFT --> VERIFY{"Verify: every field<br/>traces to source data?"}
     VERIFY -->|no| FAIL["Verification failed<br/>— never shown to a human"]
     VERIFY -->|yes| HUMAN["FinOps/platform team<br/>review (Teams card)"]
-    HUMAN -->|approved| POST["Submit to ERP<br/>via API (system unconfirmed)"]
+    HUMAN -->|approved| POST["Submit to ERP via API,<br/>or hand off draft for manual entry if no API"]
     HUMAN -->|rejected| MANUAL["Fall back to today's<br/>manual PO entry"]
     MANUAL --> FEEDBACK["Capture rejection reason<br/>— feeds future eval set"]
 ```
@@ -81,7 +81,7 @@ Every verified draft goes to the **FinOps/platform team** via a Teams Adaptive C
 
 ### 3.5 Posting integration
 
-**Assumed**: a generic ERP/procurement system with an API — not confirmed with the organization (ADR-4). Current State only says POs are "entered into the relevant system," naming neither the system nor whether it exposes an API at all. If no API exists, this step degrades to generating a structured draft for manual entry rather than a direct API submission — the drafting and verification value (§3.2–3.3) holds either way; only the last step changes.
+**Assumed**: a generic ERP/procurement system with an API (ADR-4). Current State only says POs are "entered into the relevant system," naming neither the system nor whether it exposes an API. If the actual system doesn't expose one, this step simply changes — a structured draft handed off for manual entry rather than a direct API submission — rather than eliminating the capability; the drafting and verification value (§3.2–3.3) is unaffected either way.
 
 ---
 
@@ -111,11 +111,11 @@ Same reasoning as Cloud Workbench §4.3 and MLOps Pipeline §3 applies in full a
 - *Alternatives considered*: A confidence-and-impact hard rule mirroring Bill Verification's (ADR-2 there), rejected for now — the two capabilities differ in kind, not just degree: Bill Verification's auto-clear affects an internal reconciliation record, this affects a real financial commitment. Revisit only after this capability has a real track record.
 - *Consequences*: Every drafted PO adds a review step to the FinOps/platform team's workload, deliberately, rather than reducing it to zero for the lowest-risk cases — the point of this capability is eliminating re-keying, not eliminating review.
 
-**ADR-4: Assume a generic ERP/procurement system with an API, unconfirmed with the organization**
-- *Context*: No system is named anywhere in this document set for where POs are actually entered.
-- *Decision*: Design §3.5's posting step against a generic API-exposing ERP/procurement system, rather than leaving it fully unspecified.
-- *Alternatives considered*: Naming a specific real product (SAP, Oracle, Coupa) by guess, rejected — no evidence points to any specific one, and guessing wrong is worse than staying generic until confirmed. Leaving posting entirely undesigned, rejected — the drafting and verification value (§3.2–3.3) stands on its own regardless of the posting mechanism, so it's worth designing even with this one piece unconfirmed.
-- *Consequences*: §3.5 is the one part of this document that can't be finished without the organization input — same category of open item as Bill Verification's vendor-rate source and the Contract document's CAB system of record.
+**ADR-4: Assume a generic API-exposing ERP/procurement system, with an explicit manual-entry fallback if it doesn't expose one**
+- *Context*: No system is named anywhere in this document set for where POs are actually entered, or whether it has an API.
+- *Decision*: Design §3.5's posting step against a generic API-exposing ERP/procurement system. If the real system turns out not to support API interaction, the posting step changes to a manual-entry hand-off (§3.5) rather than the capability being eliminated — drafting and verification (§3.2–3.3) don't depend on how the last step is fulfilled.
+- *Alternatives considered*: Naming a specific real product (SAP, Oracle, Coupa) by guess, rejected — no evidence points to any specific one, and guessing wrong is worse than staying generic. Leaving posting entirely undesigned, rejected — the drafting and verification value stands on its own regardless of the posting mechanism, so it's worth designing with a stated fallback rather than leaving a gap.
+- *Consequences*: §3.5's specific integration call is the one piece that changes once the real system is known; the rest of this document's design is unaffected either way.
 
 ---
 
