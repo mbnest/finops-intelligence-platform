@@ -306,9 +306,10 @@ ROLLBACK: rollback_from_snapshot(action_payload) -> RollbackResult [Activity]
 
 | Component | Name | Purpose |
 |---|---|---|
-| Approval queue table (Postgres) | `action_approval_requests` | `request_id`, `action_payload`, `risk_tier`, `status`, `approver_id`, `decided_at` — operational state, not Snowflake (Governed Automation ADR-003) |
+| Approval queue table (Postgres) | `action_approval_requests` | `request_id` (PK), `workflow_id` (Temporal workflow/run ID — an approve/reject decision Signals this specific workflow, so it has to be stored, not just implied), `origin` (`core_intelligence` \| `cloud_workbench` \| `self_serve_api`), `apm_id` (scopes which team's approvers can see/act on this request), `action_payload`, `risk_tier`, `contract_id` (FK → `contracts`, Governed Automation §3.4 — nullable until that entity exists), `status`, `approver_id`, `requested_at`, `decided_at` — operational state, not Snowflake (Governed Automation ADR-003) |
 | Approval service | `approval_queue_service` | Exposes review/approve/reject API for MEDIUM/HIGH tier actions; an approve/reject call sends a Temporal Signal to the corresponding workflow |
-| Audit table (Snowflake gold) | `gold.fact_action_audit` | `request_id`, `action_payload`, `risk_tier`, `origin`, `outcome`, `executed_at`, `rolled_back` (bool) — synced from Postgres/Temporal history once a workflow completes, for cross-platform reporting (Governed Automation ADR-003) |
+| Contract table (Postgres) | `contracts` | **Illustrative — the contract entity itself is not yet designed (Governed Automation §3.4)**; a lightweight starting model, not a final one: `contract_id` (PK), `apm_id`, `tier_scope` (LOW-only vs. full MEDIUM/HIGH, per §3.4's tiered-contract note), `pre_approved_actions`, `notification_requirements`, `change_window`, `rollback_guarantee`, `escalation_path`, `signed_by`, `signed_at`, `status` (active/expired/revoked). Same OLTP access pattern as the approval queue (checked before allowing automation), so Postgres by the same ADR-003 reasoning, not Snowflake |
+| Audit table (Snowflake gold) | `gold.fact_action_audit` | `request_id`, `action_payload`, `risk_tier`, `origin`, `contract_id`, `outcome`, `executed_at`, `rolled_back` (bool) — synced from Postgres/Temporal history once a workflow completes, for cross-platform reporting (Governed Automation ADR-003); `contract_id` added so FR4's audit trail actually links to "the agreement that authorized it," not just the APM ID |
 
 **Policy-as-code (Open Policy Agent, enforced independently of agent reasoning)**:
 
