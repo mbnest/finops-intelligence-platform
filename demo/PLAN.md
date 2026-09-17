@@ -4,7 +4,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 | | |
 |---|---|
-| **Status** | Steps 1 and 2 done; step 3 next |
+| **Status** | Steps 1 to 3 done; step 4 next |
 | **Last updated** | 2026-09-17 |
 | **Responds to** | Review item 3.1: "No code at all" |
 
@@ -12,7 +12,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 ## Resume here
 
-1. **Current step**: 3 (Guardrail Engine policies in OPA). Steps 1 and 2 are complete and verified.
+1. **Current step**: 4 (Orchestrator workflow in Temporal). Steps 1 to 3 are complete and verified.
 2. **Next action**: whatever is the first unchecked box in the current step.
 3. **How to verify where things stand**: run the step's "Done when" commands. Anything that passes is done, whatever the checklist says.
 4. **Log**: the Progress Log at the bottom records what changed each session and anything left half-finished.
@@ -46,6 +46,7 @@ Anything that doesn't serve one of these stays out.
 | D10 | **Python 3.13 with uv; latest package versions** | Per repository standards. `uv add`, `uv run` only |
 | D11 | **Consecutive flagged days are one anomaly episode** | A step change or ramp stays anomalous for weeks. Alerting daily gave 25 alerts for 3 real problems. Alert fatigue is the stated adoption risk (MLOps Pipeline §1.3), so episodes are what gets written to `fact_anomaly` and counted by the gate |
 | D12 | **The detector's dollar floor is $5/day, not $25** | At $25 the injected step change ($6.45/day, about $190 a month) was invisible. The floor is a judgment about what is worth chasing, so it lives in `core_intelligence/config.yaml`, not in code |
+| D13 | **OPA runs in Docker, pinned to 1.20.2** | OPA is a Go binary with no PyPI distribution, so uv can't install it. `run_policy_tests.sh` wraps the Docker call; the version is pinned so results don't drift with `latest` |
 
 ## Stand-ins
 
@@ -119,10 +120,13 @@ Result: recall 1.00 on all three kinds against the baseline's 1.00, 1.00, 0.00 (
 
 **Proves**: claim 3, policy half.
 
-- [ ] `governed_automation/policies/`: `classify_action_risk` (LOW/MEDIUM/HIGH from action type, environment, blast radius), `policy_run_caps`, kill switch, `automation_exclusions`
-- [ ] `opa test` tables covering every tier and guardrail
+- [x] `governed_automation/policies/risk.rego`: `classify_action_risk` as fixed rules, with `policy_production_gate` and `policy_blast_radius`, plus the reasons behind each tier
+- [x] `governed_automation/policies/guardrails.rego`: kill switch, contract scope, `policy_exclusions`, `policy_run_caps`, `policy_reversibility_preference`, and the `decision` object the Orchestrator reads
+- [x] 23 `opa test` cases covering every tier and every guardrail
+- [x] `run_policy_tests.sh` (Docker, OPA pinned to 1.20.2)
+- [x] Tests shown to fail: changing the production gate's tag value fails 4 of 23
 
-**Done when**: `opa test governed_automation/policies -v` passes.
+**Done when**: `./run_policy_tests.sh -v` passes. Result: 23/23.
 
 ### Step 4: Orchestrator workflow (Temporal)
 
@@ -225,5 +229,6 @@ demo/
 | Date | Step | What happened | Left unfinished |
 |---|---|---|---|
 | 2026-09-17 | Plan | Plan written; decisions D1–D10 recorded; DuckDB chosen over a Snowflake trial | |
+| 2026-09-17 | 3 | Rego policies for risk tiers and all guardrails, 23 opa tests, Docker runner pinned to OPA 1.20.2. Verified: mutating the production gate fails 4 tests. Guardrails only restrict; advisory is the default | Nothing. Step 4 needs a Temporal dev server (Docker) |
 | 2026-09-17 | 2 | Detector, episode grouping, eval gate, 17 unit tests. Verified: gate exits 1 when the detector is degraded and 0 when restored; detector beats the naive baseline on the ramp. Tuning during the step: dollar floor lowered to $5 (D12), episodes added after daily alerting produced 25 alerts for 3 anomalies (D11) | Nothing. Committed separately from step 1 |
 | 2026-09-17 | 1 | Generator, bronze/silver/gold, five metrics, 45 dbt tests passing from a clean run; generation deterministic (identical file hashes across runs). Verified: restated May Azure delivery replaces delivery 1; spike lands on 2026-05-12; Azure reservation utilization drops to about 92% after the covered VM ends; variance components sum exactly | Nothing. Not yet committed |

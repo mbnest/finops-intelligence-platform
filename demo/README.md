@@ -47,6 +47,12 @@ uv run python -m core_intelligence.eval_gate
 uv run pytest
 ```
 
+Check the Guardrail Engine's policies (needs Docker; OPA is a Go binary, so it is not installable with uv):
+
+```bash
+./run_policy_tests.sh -v
+```
+
 Later steps add commands here as they land.
 
 ## What to look for
@@ -108,6 +114,21 @@ Two things the gate checks beyond recall:
 - **Expected changes.** A new GPU resource and a removed VM are real cost changes, not anomalies. Flagging either fails the gate.
 
 The gate exits non-zero when a threshold is missed, so CI can block the change. Raising the dollar threshold so the detector misses the step and the ramp makes it exit 1 and name both misses.
+
+**6. Risk classification is policy, not code in the workflow.** The Guardrail Engine is Rego evaluated by OPA, separate from the Orchestrator that will run the workflow in step 4. It decides how risky an action is and nothing else, so no component both proposes an action and rules on whether it is safe.
+
+The same idle non-production VM gets a different answer as the situation changes:
+
+| situation | tier | what the Orchestrator does |
+|---|---|---|
+| Idle non-prod VM, active contract | LOW | runs automatically |
+| Same action on a production target | HIGH | waits for a person, always |
+| Affects several resources at once | MEDIUM | opt-out window first |
+| Kill switch thrown | any | advisory only |
+| Resource excluded, or run cap reached | any | advisory only |
+| Terminate with no snapshot available | any | advisory only |
+
+Guardrails only ever restrict: nothing in the policy can raise an action's permission level, and advisory is where every resource starts. 23 policy tests cover each tier and each guardrail; changing the production gate to look for the wrong tag value fails four of them.
 
 ## How the data is made
 
