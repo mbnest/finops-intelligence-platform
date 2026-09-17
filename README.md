@@ -18,8 +18,8 @@ This repository works through an ambiguous, high-stakes architecture problem fro
 2. Identifies the **opportunities** a modern platform opens up ([`FinOps Opportunities.md`](docs/FinOps%20Opportunities.md)).
 3. Designs the **target platform** end to end: architecture, data model, ML and AI governance, ADRs, build-ready specifications, an operating model, and a migration plan, across fourteen cross-referenced documents.
 4. Makes the agentic design explicit. A durable-workflow **Orchestrator** (Temporal) is kept separate from a policy-as-code **Guardrail Engine** (OPA), so no single component decides both what to do and whether it is safe. Cloud Workbench, the platform's one agentic surface, is a **bounded agent with an explicit graph** (pydantic-graph: typed nodes and edges, tools over MCP, and the ability to propose a governed action but never execute one), chosen over more autonomous frameworks such as LangGraph or CrewAI for the auditability a financial domain needs.
+5. **Builds a runnable slice of it** ([`demo/`](demo)), so the load-bearing claims are demonstrated in code instead of asserted in prose.
 
-**On the company name.** the organization is a real company, named because a real job posting named it. Nothing in this repository is confirmed the organization fact, and every document says so. This is not an insider account of the organization's systems, and it isn't affiliated with or endorsed by the organization. The point is not "here is the organization's FinOps platform"; it is "here is how I approach the problem, and how far I take it."
 
 ## Why
 
@@ -64,12 +64,28 @@ None of that time comes back unless the automation is trustworthy, which is what
 ## How to read this
 
 1. [`FinOps Architecture Brief.md`](docs/FinOps%20Architecture%20Brief.md): the whole design in a few pages.
-2. [`FinOps Current State.md`](docs/FinOps%20Current%20State.md): where the practice is today, and how confident to be in that picture.
+2. [`FinOps Current State.md`](docs/FinOps%20Current%20State.md): where the practice is today per current understanding, and how confident to be in that picture.
 3. [`FinOps Opportunities.md`](docs/FinOps%20Opportunities.md): what a modern platform adds.
 4. [`FinOps Solution Overview.md`](docs/FinOps%20Solution%20Overview.md): phases, architecture, operating model, test strategy, rollout waves, master ADRs, and the index of sub-documents.
 5. The **Solution Architecture** sub-documents, one per phase or extension (linked from the Overview's Sub-Document Index).
 6. [`Platform_Build_Specification.md`](docs/Platform_Build_Specification.md): table names, job names, function signatures, and policy names for every phase.
 7. [`References.md`](docs/References.md): vendor documentation behind decision-driving claims, and what couldn't be confirmed.
+8. [`demo/`](demo): the runnable slice, with a quickstart and a short tour of what to look at.
+
+## The demo slice
+
+The design's four load-bearing claims are the ones a reviewer should be most skeptical of, so [`demo/`](demo) proves each in working code. It runs locally in minutes on DuckDB and Docker, with no cloud account:
+
+| Claim | How the demo shows it |
+|---|---|
+| The cost data model is right | FOCUS data with four cost columns that genuinely differ, and restated billing periods replaced rather than merged |
+| Models are judged, not trusted | Anomalies of known kind and size are injected; the detector never sees the answer key, and an eval gate scores it against a naive baseline and fails the build when it slips |
+| Workflow and policy stay separate | A Temporal workflow sequences and waits; OPA classifies risk. Four idle resources produce four different governed outcomes |
+| Personas are enforced in code | An MCP server binds the action tool only for a persona allowed to act, and scopes every read to the caller's verticals |
+
+Every one of those is checked by breaking it: removing the latest-delivery logic, raising the detector's dollar floor, deleting the kill-switch re-check, and binding the action tool for everyone each fail the tests that claim to cover them. `demo/README.md` has the quickstart and the tour; `demo/PLAN.md` has the decisions and build log.
+
+**What the demo is not.** It stands in for the platform, it does not implement it: DuckDB for Snowflake, generated data for provider exports, and a fake executor in place of IDP or CMP. The stand-ins are listed in `demo/README.md`.
 
 ## Repository structure
 
@@ -91,6 +107,16 @@ docs/
 ├── Platform_Build_Specification.md                         Build-ready detail for every phase
 ├── References.md                                                Vendor documentation behind key claims
 └── Systems Engineer Prin.md                                     The job posting this responds to
+
+demo/                                                            Runnable slice of the design
+├── README.md                                                    Quickstart, what to look for, stand-ins
+├── PLAN.md                                                      Decisions, build order, progress log
+├── data_generator/                                              spec.yaml holds every generation rule
+├── dbt/                                                         bronze, silver, gold, metric models, tests
+├── core_intelligence/                                           Anomaly detector and eval gate
+├── governed_automation/                                         Temporal workflow and OPA policies
+├── mcp_server/                                                  Persona-bound tools
+└── tests/                                                       pytest suite
 ```
 
 ## Methodology & limitations
@@ -100,3 +126,5 @@ Every document states its confidence and labels assumptions as assumptions. The 
 ## Status
 
 All five phases have a solution architecture, and the Build Specification covers every phase. The Solution Overview includes an operating model, a wave-based migration plan, and a communications plan. Not included on purpose: stakeholder validation of any inferred fact; numbers for sizing, platform cost, on-call, and staffing (these need the organization's data, and the Overview's Implementation Prerequisites section lists each one, its inputs, and how it would be produced); and a detailed test plan (the Overview's Test Strategy sets direction only). The Overview's Open Items to Validate has the current list.
+
+The demo covers a slice of Phases 1 to 3 and 5: the data foundation, anomaly detection with its eval gate, the governed action harness, and the MCP tool surface. Bill verification, RI/SP planning, the ontology and graph, and the agent itself are designed but not built.
