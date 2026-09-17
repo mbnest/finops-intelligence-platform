@@ -41,6 +41,7 @@ Requirements that span every phase. Phase-specific requirements (query latency, 
 | Auditability | Every phase's outputs reconstructable — what was asked or computed, from what data, by what model or policy version | HITRUST/SOC2-equivalent governance posture, consistent across phases |
 | Data segregation | Vertical/account isolation enforced at the catalog/query layer, inherited by every consumer rather than reimplemented | Multi-tenant horizontal platform, compliance-sensitive |
 | Platform's own cost | Tracked with the same rigor applied to the cloud spend it analyzes | A FinOps platform with an unmeasured cost of its own undercuts its own credibility |
+| Alerting channels | Every alert (infrastructure, data quality, model quality, execution failure) posts to a Teams channel for visibility and opens a ticket/pages on-call via ITSM (believed to be ServiceNow, not confirmed) — one shared pair of channels, not a per-phase choice | Inherited from Data Foundations §4.5's shared observability baseline; consistent incident visibility/response regardless of which phase raised the alert |
 
 ### Cross-Cutting Non-Goals (inferred)
 
