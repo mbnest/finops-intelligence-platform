@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: fact_cost_daily
+    columns:
+      - name: date
+        data_tests: [not_null]
+      - name: account_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_account')
+                field: account_id
+      - name: charge_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [Usage, Purchase]
+      - name: pricing_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [Standard, Committed]
+      - name: commitment_discount_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_commitment')
+                field: commitment_discount_id
+  - name: dim_account
+    columns:
+      - name: account_id
+        data_tests: [unique, not_null]
+  - name: dim_vertical
+    columns:
+      - name: vertical_id
+        data_tests: [unique, not_null]
+  - name: dim_application
+    columns:
+      - name: apm_id
+        data_tests: [unique, not_null]
+  - name: dim_resource
+    columns:
+      - name: resource_id
+        data_tests: [unique, not_null]
+  - name: dim_commitment
+    columns:
+      - name: commitment_discount_id
+        data_tests: [unique, not_null]

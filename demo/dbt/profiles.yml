@@ -1,0 +1,9 @@
+finops_demo:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: data/warehouse.duckdb
+      threads: 4
+      settings:
+        TimeZone: UTC

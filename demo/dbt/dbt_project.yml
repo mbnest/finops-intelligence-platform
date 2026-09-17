@@ -1,0 +1,26 @@
+name: finops_demo
+version: "0.1.0"
+config-version: 2
+profile: finops_demo
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+vars:
+  data_dir: data
+
+models:
+  finops_demo:
+    bronze:
+      +schema: bronze
+      +materialized: table
+    silver:
+      +schema: silver
+      +materialized: table
+    gold:
+      +schema: gold
+      +materialized: table
+    semantic:
+      +schema: semantic
+      +materialized: view

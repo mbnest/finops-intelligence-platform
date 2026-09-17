@@ -1,0 +1,37 @@
+# Metric catalog: the governed definition of each metric, read by get_metric_definition (step 5).
+# Stands in for Snowflake Semantic Views. Every consumer uses these definitions instead of computing its own.
+version: 1
+metrics:
+  - name: metric_total_spend
+    model: semantic.metric_total_spend
+    description: Total spend on an amortized basis.
+    definition: SUM(effective_cost) from gold.fact_cost_daily
+    grain: [billing_period, provider, vertical_id, account_id]
+    cost_basis: effective_cost
+  - name: metric_ri_coverage
+    model: semantic.metric_ri_coverage
+    description: Share of commitment-eligible usage cost covered by a commitment.
+    definition: SUM(effective_cost WHERE pricing_category = 'Committed') / SUM(effective_cost), over compute usage rows with a resource
+    grain: [billing_period, provider]
+    cost_basis: effective_cost
+  - name: metric_ri_sp_utilization
+    model: semantic.metric_ri_sp_utilization
+    description: Share of a commitment's amortized cost that was used, not left unused.
+    definition: SUM(effective_cost WHERE commitment_discount_status = 'Used') / SUM(effective_cost), over usage rows with a commitment_discount_id
+    grain: [billing_period, commitment_discount_id]
+    cost_basis: effective_cost
+  - name: metric_unattributed_spend_pct
+    model: semantic.metric_unattributed_spend_pct
+    description: Share of spend with no resolved APM ID, weighted by dollars.
+    definition: SUM(effective_cost WHERE apm_id IS NULL) / SUM(effective_cost)
+    grain: [billing_period]
+    cost_basis: effective_cost
+    notes: Includes charges with no resource (support, unused commitment), which are attributed by account-level allocation rules not modeled in the demo.
+  - name: metric_spend_variance_mom
+    model: semantic.metric_spend_variance_mom
+    description: Month-over-month change in spend per vertical, split into its causes.
+    definition: >
+      spend_change = new_resources + removed_resources + usage_change + price_change + other_change, where for a resource billed
+      in both periods usage_change = (qty - prior_qty) * prior_unit_cost and price_change = (unit_cost - prior_unit_cost) * qty
+    grain: [billing_period, vertical_id]
+    cost_basis: effective_cost

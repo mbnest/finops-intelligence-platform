@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: cost_line_items_clean
+    columns:
+      - name: line_item_key
+        data_tests: [unique, not_null]
+      - name: billing_currency
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [USD]
+      - name: vertical_id
+        data_tests: [not_null]
+
+unit_tests:
+  - name: keeps_only_latest_delivery_per_billing_period
+    description: A restated period keeps only its latest delivery; a period with one delivery is unaffected.
+    model: cost_line_items_clean
+    given:
+      - input: ref('cost_line_items_raw')
+        rows:
+          - {provider: azure, BillingAccountId: az-ea-001, billing_period: "2026-05", delivery: "1", delivery_id: azure/2026-05/1, SubAccountId: az-sub-projects, ChargePeriodStart: "2026-05-01T00:00:00Z", SkuId: GP_Gen5_2, ChargeCategory: Usage, PricingCategory: Standard, BilledCost: "100.0", Tags: "{}"}
+          - {provider: azure, BillingAccountId: az-ea-001, billing_period: "2026-05", delivery: "2", delivery_id: azure/2026-05/2, SubAccountId: az-sub-projects, ChargePeriodStart: "2026-05-01T00:00:00Z", SkuId: GP_Gen5_2, ChargeCategory: Usage, PricingCategory: Standard, BilledCost: "90.0", Tags: "{}"}
+          - {provider: azure, BillingAccountId: az-ea-001, billing_period: "2026-04", delivery: "1", delivery_id: azure/2026-04/1, SubAccountId: az-sub-projects, ChargePeriodStart: "2026-04-01T00:00:00Z", SkuId: GP_Gen5_2, ChargeCategory: Usage, PricingCategory: Standard, BilledCost: "50.0", Tags: "{}"}
+      - input: ref('account_metadata')
+        rows:
+          - {account_id: az-sub-projects, vertical_id: project_mgmt}
+    expect:
+      rows:
+        - {billing_period: "2026-05", delivery_id: azure/2026-05/2, billed_cost: 90.0, vertical_id: project_mgmt}
+        - {billing_period: "2026-04", delivery_id: azure/2026-04/1, billed_cost: 50.0, vertical_id: project_mgmt}
