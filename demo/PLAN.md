@@ -4,7 +4,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 | | |
 |---|---|
-| **Status** | Steps 1 to 3 done; step 4 next |
+| **Status** | Steps 1 to 4 done; step 5 next |
 | **Last updated** | 2026-09-17 |
 | **Responds to** | Review item 3.1: "No code at all" |
 
@@ -12,7 +12,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 ## Resume here
 
-1. **Current step**: 4 (Orchestrator workflow in Temporal). Steps 1 to 3 are complete and verified.
+1. **Current step**: 5 (MCP server). Steps 1 to 4 are complete and verified.
 2. **Next action**: whatever is the first unchecked box in the current step.
 3. **How to verify where things stand**: run the step's "Done when" commands. Anything that passes is done, whatever the checklist says.
 4. **Log**: the Progress Log at the bottom records what changed each session and anything left half-finished.
@@ -47,6 +47,8 @@ Anything that doesn't serve one of these stays out.
 | D11 | **Consecutive flagged days are one anomaly episode** | A step change or ramp stays anomalous for weeks. Alerting daily gave 25 alerts for 3 real problems. Alert fatigue is the stated adoption risk (MLOps Pipeline §1.3), so episodes are what gets written to `fact_anomaly` and counted by the gate |
 | D12 | **The detector's dollar floor is $5/day, not $25** | At $25 the injected step change ($6.45/day, about $190 a month) was invisible. The floor is a judgment about what is worth chasing, so it lives in `core_intelligence/config.yaml`, not in code |
 | D13 | **OPA runs in Docker, pinned to 1.20.2** | OPA is a Go binary with no PyPI distribution, so uv can't install it. `run_policy_tests.sh` wraps the Docker call; the version is pinned so results don't drift with `latest` |
+| D14 | **Temporal dev server and OPA run from docker-compose; tests use short timers, not time-skipping** | Time-skipping downloads a test server binary on first use. Docker was already in play, so the workflow tests run against a real dev server with the windows shortened through config (1s opt-out, 5s approval). The durations are workflow input, so production keeps 24-hour windows |
+| D15 | **Governed Automation state lives in the same DuckDB file as gold** | The design puts contracts, automation_controls, automation_exclusions, and the action audit in managed Postgres. One store keeps the demo runnable with no extra service; the table names and shapes match the specification |
 
 ## Stand-ins
 
@@ -132,12 +134,15 @@ Result: recall 1.00 on all three kinds against the baseline's 1.00, 1.00, 0.00 (
 
 **Proves**: claim 3, workflow half.
 
-- [ ] Idle-resource rule over the generated utilization data produces proposals
-- [ ] `propose_action` workflow: `check_automation_enabled`, `check_contract_exists`, `classify_action_risk` (calls OPA), tier branch (LOW executes, MEDIUM opt-out timer, HIGH approval signal), fake `execute_action`, audit row
-- [ ] Idempotent Activities
-- [ ] Tests in Temporal's time-skipping environment: LOW runs, MEDIUM opt-out cancels, HIGH waits then approves, kill switch blocks; one replay test
+- [x] `governed_automation/proposals.py`: idle-resource rule over utilization and cost, producing four proposals
+- [x] `governed_automation/workflow.py`: `propose_action` with `check_automation_enabled`, `check_contract_exists`, `classify_action_risk` (calls OPA), the LOW/MEDIUM/HIGH branches, a kill-switch re-check before execution, a fake `execute_action`, and an audit row
+- [x] `governed_automation/storage.py`: contracts, `automation_controls`, `automation_exclusions`, `fact_action_audit`
+- [x] Activities idempotent on the workflow ID
+- [x] `docker-compose.yml`: Temporal dev server plus OPA as the decision point
+- [x] 12 workflow tests: auto, dry-run, advisory, approval, rejection, expiry, opt-out, opt-out timeout, kill switch mid-wait, exclusion, audit idempotency, and a replay test
+- [x] Tests shown to fail: removing the kill-switch re-check fails the mid-wait test
 
-**Done when**: workflow tests pass and a local run shows one LOW action executed and one HIGH action waiting.
+**Done when**: workflow tests pass and a local run shows one LOW action executed and one HIGH action waiting. Result: 29 tests pass overall; `run_demo` shows executed, dry_run, advisory, and an approved HIGH action across four idle resources.
 
 ### Step 5: MCP server
 
@@ -229,6 +234,7 @@ demo/
 | Date | Step | What happened | Left unfinished |
 |---|---|---|---|
 | 2026-09-17 | Plan | Plan written; decisions D1–D10 recorded; DuckDB chosen over a Snowflake trial | |
+| 2026-09-17 | 4 | propose_action workflow on Temporal, idle-resource proposals, DuckDB-backed contracts/controls/exclusions/audit, docker-compose for Temporal and OPA, 12 workflow tests including a replay test. Verified: removing the kill-switch re-check fails its test; four proposals produce four different governed outcomes | Nothing. Step 5 is the MCP server |
 | 2026-09-17 | 3 | Rego policies for risk tiers and all guardrails, 23 opa tests, Docker runner pinned to OPA 1.20.2. Verified: mutating the production gate fails 4 tests. Guardrails only restrict; advisory is the default | Nothing. Step 4 needs a Temporal dev server (Docker) |
 | 2026-09-17 | 2 | Detector, episode grouping, eval gate, 17 unit tests. Verified: gate exits 1 when the detector is degraded and 0 when restored; detector beats the naive baseline on the ramp. Tuning during the step: dollar floor lowered to $5 (D12), episodes added after daily alerting produced 25 alerts for 3 anomalies (D11) | Nothing. Committed separately from step 1 |
 | 2026-09-17 | 1 | Generator, bronze/silver/gold, five metrics, 45 dbt tests passing from a clean run; generation deterministic (identical file hashes across runs). Verified: restated May Azure delivery replaces delivery 1; spike lands on 2026-05-12; Azure reservation utilization drops to about 92% after the covered VM ends; variance components sum exactly | Nothing. Not yet committed |

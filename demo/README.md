@@ -47,10 +47,19 @@ uv run python -m core_intelligence.eval_gate
 uv run pytest
 ```
 
-Check the Guardrail Engine's policies (needs Docker; OPA is a Go binary, so it is not installable with uv):
+Start the two services the action layer needs, then check the Guardrail Engine's policies (OPA is a Go
+binary, so it is not installable with uv):
 
 ```bash
+docker compose up -d
 ./run_policy_tests.sh -v
+```
+
+Run every idle-resource proposal through the governed harness:
+
+```bash
+uv run python -m governed_automation.run_demo
+uv run pytest
 ```
 
 Later steps add commands here as they land.
@@ -129,6 +138,26 @@ The same idle non-production VM gets a different answer as the situation changes
 | Terminate with no snapshot available | any | advisory only |
 
 Guardrails only ever restrict: nothing in the policy can raise an action's permission level, and advisory is where every resource starts. 23 policy tests cover each tier and each guardrail; changing the production gate to look for the wrong tag value fails four of them.
+
+**7. The same proposal gets four different answers.** Four idle resources, one code path, outcomes decided by policy and contract:
+
+```
+resource                        apm       tier   outcome     why
+aws-ec2-facilities-dev          APM-1003  LOW    executed
+aws-ec2-valuation-legacy        APM-1002  HIGH   executed    after an approver signed
+az-vm-projecttracker-test       APM-1007  LOW    dry_run     contract is in dry-run mode
+gcp-gce-portfolio-sandbox       APM-1005  LOW    advisory    no active automation contract
+```
+
+The Orchestrator (Temporal) sequences the work and waits; the Guardrail Engine (OPA) decides risk. Neither does the other's job, which is what makes letting LOW-tier actions run unattended defensible.
+
+Three behaviours the tests pin down, because they are what a reviewer should be skeptical about:
+
+- **An owner can stop a MEDIUM action** during its opt-out window, and the reason is recorded.
+- **The kill switch is re-checked before execution**, not only at proposal time. An action approved during an incident still does not run. Removing that second check fails the test.
+- **A recorded workflow history replays against the current code**, which is how non-deterministic changes get caught before they break workflows that are mid-approval.
+
+Activities are idempotent on the workflow ID, so a retried worker cannot execute or double count an action. Nothing here calls a cloud API: the executor is a stand-in, because what is being shown is the decision path around it.
 
 ## How the data is made
 

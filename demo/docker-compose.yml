@@ -1,0 +1,16 @@
+# Local stand-ins for the two managed services Governed Automation uses (Build Specification §8):
+# Temporal Cloud, and OPA running beside the workers as the Guardrail Engine's decision point.
+services:
+  temporal:
+    image: temporalio/temporal:1.5.0
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--log-level", "warn"]
+    ports:
+      - "7233:7233"   # gRPC, what the workers connect to
+      - "8233:8233"   # web UI, useful for watching a workflow wait
+  opa:
+    image: openpolicyagent/opa:1.20.2
+    command: ["run", "--server", "--addr", "0.0.0.0:8181", "/policies"]
+    volumes:
+      - ./governed_automation/policies:/policies:ro
+    ports:
+      - "8181:8181"

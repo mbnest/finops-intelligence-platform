@@ -1,0 +1,17 @@
+# Governed Automation settings. Timers are short here so the demo and its tests finish quickly;
+# the design's defaults are a 24-hour opt-out window and an open-ended approval wait.
+temporal_address: localhost:7233
+task_queue: finops-governed-automation
+opa_decision_url: http://localhost:8181/v1/data/finops/guardrails/decision
+
+opt_out_window_seconds: 10
+approval_timeout_seconds: 60
+
+caps:
+  per_application: 10
+  platform: 50
+
+idle:
+  cpu_threshold_pct: 5.0      # average CPU below this counts as idle
+  lookback_days: 30
+  min_daily_cost: 0.50        # ignore idle resources too cheap to be worth an action

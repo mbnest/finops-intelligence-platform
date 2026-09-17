@@ -172,3 +172,6 @@ utilization:
 contracts:
   - {apm_id: APM-1003, allowed_max_tier: LOW, execution_mode: live, status: active}
   - {apm_id: APM-1007, allowed_max_tier: LOW, execution_mode: dry_run, status: active}
+  # Signed for the full tier range, so a HIGH-tier action on its production resources reaches an
+  # approver instead of stopping at advisory.
+  - {apm_id: APM-1002, allowed_max_tier: FULL, execution_mode: live, status: active}
