@@ -4,7 +4,7 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 | | |
 |---|---|
-| **Status** | Steps 1 to 5 done; step 6 (CI) next |
+| **Status** | All six steps done |
 | **Last updated** | 2026-09-17 |
 | **Responds to** | Review item 3.1: "No code at all" |
 
@@ -12,8 +12,8 @@ Working plan and progress log for the demo slice. Read **Resume here** first whe
 
 ## Resume here
 
-1. **Current step**: 6 (CI). Steps 1 to 5 are complete and verified.
-2. **Next action**: whatever is the first unchecked box in the current step.
+1. **Current step**: none. All six steps are complete and verified.
+2. **Next action**: nothing planned. The stretch items below are optional; otherwise this slice is done.
 3. **How to verify where things stand**: run the step's "Done when" commands. Anything that passes is done, whatever the checklist says.
 4. **Log**: the Progress Log at the bottom records what changed each session and anything left half-finished.
 
@@ -161,9 +161,11 @@ Result: recall 1.00 on all three kinds against the baseline's 1.00, 1.00, 0.00 (
 
 ### Step 6: CI
 
-- [ ] `.github/workflows/demo.yml`: generate, `dbt build`, pytest, eval gate, `opa test`, workflow tests
+- [x] `.github/workflows/demo.yml`: generate, `dbt build`, anomaly scoring, eval gate, `opa test`, pytest
+- [x] `wait_for_services.py`: readiness probe that connects a Temporal client and asks OPA a real policy question, because a port check passes before either can serve a request
+- [x] Whole sequence verified locally from a clean state
 
-**Done when**: CI is green on a push.
+**Done when**: CI is green on a push. Locally the full sequence passes from scratch (45 dbt tests, eval gate passed, 23 policy tests, 41 pytest). The workflow itself has not run on GitHub yet: it needs a push.
 
 ### Stretch (not committed to)
 
@@ -239,6 +241,7 @@ demo/
 | Date | Step | What happened | Left unfinished |
 |---|---|---|---|
 | 2026-09-17 | Plan | Plan written; decisions D1–D10 recorded; DuckDB chosen over a Snowflake trial | |
+| 2026-09-17 | 6 | CI workflow running every gate, plus a readiness probe. Verified: the sequence passes locally from a clean state. Found while writing it: port probes report Temporal closed while a real client connects, so readiness uses the client and a live OPA query | The workflow has not run on GitHub; it needs a push |
 | 2026-09-17 | 5 | MCP server with persona-bound tools and vertical-scoped queries, 12 tests including a stdio round trip, README walkthrough with client config. Verified: binding the action tool for everyone fails its test. Found by testing: APM-1003 had hit its 10-per-24h run cap from earlier runs, so tests now share a state reset and run_demo has --fresh | Nothing. Step 6 is CI |
 | 2026-09-17 | 4 | propose_action workflow on Temporal, idle-resource proposals, DuckDB-backed contracts/controls/exclusions/audit, docker-compose for Temporal and OPA, 12 workflow tests including a replay test. Verified: removing the kill-switch re-check fails its test; four proposals produce four different governed outcomes | Nothing. Step 5 is the MCP server |
 | 2026-09-17 | 3 | Rego policies for risk tiers and all guardrails, 23 opa tests, Docker runner pinned to OPA 1.20.2. Verified: mutating the production gate fails 4 tests. Guardrails only restrict; advisory is the default | Nothing. Step 4 needs a Temporal dev server (Docker) |

@@ -1,0 +1,60 @@
+# Runs the demo slice end to end: build the data, then let every gate that can block a change run.
+# This is the Test Strategy in the Solution Overview, applied to the code that exists.
+name: demo
+
+on:
+  push:
+    paths: ["demo/**", ".github/workflows/demo.yml"]
+  pull_request:
+    paths: ["demo/**", ".github/workflows/demo.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: demo
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: demo/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Start Temporal and OPA
+        run: |
+          docker compose up -d
+          uv run python wait_for_services.py
+
+      # Phase 1: the data foundation. dbt build runs the models, then every data test,
+      # unit test, and cost basis invariant against them.
+      - name: Generate the dataset
+        run: uv run python -m data_generator.generate
+
+      - name: Build and test the warehouse
+        run: uv run dbt build --project-dir dbt --profiles-dir dbt
+
+      # Phase 2: the model earns its way in, or the build fails.
+      - name: Score anomalies
+        run: uv run python -m core_intelligence.anomaly
+
+      - name: Eval gate
+        run: uv run python -m core_intelligence.eval_gate
+
+      # Phase 3: policy first, then the workflows and tools that depend on it.
+      - name: Guardrail policy tests
+        run: ./run_policy_tests.sh
+
+      - name: Python tests
+        run: uv run pytest -q
+
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose logs --tail 100

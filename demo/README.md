@@ -52,6 +52,7 @@ binary, so it is not installable with uv):
 
 ```bash
 docker compose up -d
+uv run python wait_for_services.py
 ./run_policy_tests.sh -v
 ```
 
@@ -203,6 +204,14 @@ Activities are idempotent on the workflow ID, so a retried worker cannot execute
 A Vertical caller cannot take an action because the tool is never bound for that persona, so there is no instruction to argue with. Scope is checked again inside every query, the way a row access policy applies to every consumer. Binding the action tool for everyone fails the persona test.
 
 Refusals say why ("advisory is outside your verticals (workplace)"), and an unknown metric name answers with the metrics that do exist, so a caller can recover instead of guessing.
+
+## Continuous integration
+
+[`.github/workflows/demo.yml`](../.github/workflows/demo.yml) runs the same sequence on every push that
+touches `demo/`: generate the data, `dbt build` (models plus every data, unit, and invariant test),
+score anomalies, the eval gate, the policy tests, then pytest. Each one can fail the build, which is
+what the Test Strategy in the Solution Overview describes: gates that run in CI rather than gates
+someone remembers to run.
 
 ## How the data is made
 
