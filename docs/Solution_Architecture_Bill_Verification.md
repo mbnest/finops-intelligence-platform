@@ -21,7 +21,7 @@ After bill verification and contract association, POs are entered, vendors are p
 The unit being verified is an **invoice line** from the provider's actual invoice, not a row of daily usage data. Each invoice line is compared against three things:
 
 1. **The billing data behind it.** The invoiced amount should equal `SUM(billed_cost)` of the `gold.fact_cost_daily` rows with the same `invoice_id` and charge type. The comparison uses billed cost, not amortized cost, because billed cost is what the invoice charges (Data Foundations §4.3, cost basis).
-2. **the organization's contract terms.** Negotiated pricing, enterprise discounts (AWS EDP, Azure MACC/EA, GCP commitments), private pricing, and credits owed should all be applied. FOCUS exports already carry `ContractedUnitPrice` per row where the provider supports it. `RATE_CARD` holds the terms the export doesn't carry, so the check is whether each term was applied, not a re-pricing of every SKU.
+2. **The organization's contract terms.** Negotiated pricing, enterprise discounts (AWS EDP, Azure MACC/EA, GCP commitments), private pricing, and credits owed should all be applied. FOCUS exports already carry `ContractedUnitPrice` per row where the provider supports it. `RATE_CARD` holds the terms the export doesn't carry, so the check is whether each term was applied, not a re-pricing of every SKU.
 3. **Expected usage.** Consumed quantity compared with that account's and service's own history.
 
 A mismatch on any of the three is a candidate exception. Tax, support, marketplace, and commitment purchase lines are verified the same way; they appear on the invoice even though most have no resource attached.

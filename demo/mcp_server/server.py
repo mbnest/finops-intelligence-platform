@@ -7,7 +7,7 @@ model to talk its way past (Cloud Workbench ADR-007).
 Run it as the agent's tool server:
 
     FINOPS_PERSONA=platform uv run python -m mcp_server.server
-    FINOPS_PERSONA=vertical FINOPS_VERTICALS=workplace uv run python -m mcp_server.server
+    FINOPS_PERSONA=vertical FINOPS_VERTICALS=logistics uv run python -m mcp_server.server
 """
 
 import functools

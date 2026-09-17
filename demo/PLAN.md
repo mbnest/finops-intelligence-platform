@@ -157,7 +157,7 @@ Result: recall 1.00 on all three kinds against the baseline's 1.00, 1.00, 0.00 (
 - [x] 12 tests: tool binding per persona, cross-vertical denial, scoped anomalies and variance, metric grounding, unknown metric, proposal through the harness, out-of-scope proposal, and a stdio round trip
 - [x] Tests shown to fail: binding the action tool for every persona fails the binding test
 
-**Done when**: scoping tests pass and the walkthrough answers "why did this vertical's bill change?" from tool calls. Result: 40 tests pass overall; over stdio the platform server exposes 5 tools and the workplace server 4.
+**Done when**: scoping tests pass and the walkthrough answers "why did this vertical's bill change?" from tool calls. Result: 40 tests pass overall; over stdio the platform server exposes 5 tools and the logistics server 4.
 
 ### Step 6: CI
 

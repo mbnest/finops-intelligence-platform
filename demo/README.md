@@ -79,10 +79,10 @@ Desktop, or Claude Code. Two personas, two different servers:
       "args": ["run", "--directory", "/absolute/path/to/demo", "python", "-m", "mcp_server.server"],
       "env": { "FINOPS_PERSONA": "platform" }
     },
-    "finops-workplace": {
+    "finops-logistics": {
       "command": "uv",
       "args": ["run", "--directory", "/absolute/path/to/demo", "python", "-m", "mcp_server.server"],
-      "env": { "FINOPS_PERSONA": "vertical", "FINOPS_VERTICALS": "workplace" }
+      "env": { "FINOPS_PERSONA": "vertical", "FINOPS_VERTICALS": "logistics" }
     }
   }
 }
@@ -93,8 +93,8 @@ Questions worth asking each of them:
 - "Why did my bill change in June?" The answer comes from `get_spend_variance`, split into causes, and
   `get_metric_definition` says how the metric is computed.
 - "What anomalies do I have, and what is the evidence?"
-- "Propose stopping the idle facilities dev box." The platform server runs it through Governed
-  Automation and reports what the harness decided. The workplace server has no such tool.
+- "Propose stopping the idle support dev box." The platform server runs it through Governed
+  Automation and reports what the harness decided. The logistics server has no such tool.
 
 Later steps add commands here as they land.
 
@@ -133,10 +133,10 @@ Provider line item IDs aren't stable across deliveries, so rows are never upsert
 
 | billing_period | vertical | spend_change | new_resources | removed_resources | usage_change | price_change | other_change |
 |---|---|---|---|---|---|---|---|
-| 2026-06 | investments | 4960.0 | 5142.0 | 0.0 | -338.1 | 48.3 | 107.8 |
-| 2026-06 | project_mgmt | -73.6 | 0.0 | -250.6 | 134.8 | 42.2 | 0.0 |
+| 2026-06 | finance | 4960.0 | 5142.0 | 0.0 | -338.1 | 48.3 | 107.8 |
+| 2026-06 | delivery | -73.6 | 0.0 | -250.6 | 134.8 | 42.2 | 0.0 |
 
-June's jump in investments is a new GPU resource, not a price rise. Project management's drop is a removed resource, partly offset by usage growth elsewhere. `other_change` is charges with no resource, here the unused commitment above.
+June's jump in finance is a new GPU resource, not a price rise. Project management's drop is a removed resource, partly offset by usage growth elsewhere. `other_change` is charges with no resource, here the unused commitment above.
 
 **5. The anomaly detector is scored, not trusted.** A FinOps practice that has never scored its own alerts has no labels, so the eval gate does what the design calls for: inject anomalies of known kind and size, and measure against them. The detector never reads the answer key.
 
@@ -167,9 +167,9 @@ The same idle non-production VM gets a different answer as the situation changes
 | Idle non-prod VM, active contract | LOW | runs automatically |
 | Same action on a production target | HIGH | waits for a person, always |
 | Affects several resources at once | MEDIUM | opt-out window first |
-| Kill switch thrown | any | advisory only |
-| Resource excluded, or run cap reached | any | advisory only |
-| Terminate with no snapshot available | any | advisory only |
+| Kill switch thrown | any | retail only |
+| Resource excluded, or run cap reached | any | retail only |
+| Terminate with no snapshot available | any | retail only |
 
 Guardrails only ever restrict: nothing in the policy can raise an action's permission level, and advisory is where every resource starts. 23 policy tests cover each tier and each guardrail; changing the production gate to look for the wrong tag value fails four of them.
 
@@ -177,10 +177,10 @@ Guardrails only ever restrict: nothing in the policy can raise an action's permi
 
 ```
 resource                        apm       tier   outcome     why
-aws-ec2-facilities-dev          APM-1003  LOW    executed
-aws-ec2-valuation-legacy        APM-1002  HIGH   executed    after an approver signed
+aws-ec2-support-dev             APM-1003  LOW    executed
+aws-ec2-pricing-legacy          APM-1002  HIGH   executed    after an approver signed
 az-vm-projecttracker-test       APM-1007  LOW    dry_run     contract is in dry-run mode
-gcp-gce-portfolio-sandbox       APM-1005  LOW    advisory    no active automation contract
+gcp-gce-usage-sandbox           APM-1005  LOW    advisory    no active automation contract
 ```
 
 The Orchestrator (Temporal) sequences the work and waits; the Guardrail Engine (OPA) decides risk. Neither does the other's job, which is what makes letting LOW-tier actions run unattended defensible.
@@ -195,15 +195,15 @@ Activities are idempotent on the workflow ID, so a retried worker cannot execute
 
 **8. Personas are enforced by what exists, not by what the model is told.** The same server, built for two callers:
 
-| | platform | workplace vertical |
+| | platform | logistics vertical |
 |---|---|---|
 | tools bound | 5, including `propose_action` | 4, no action tool |
-| anomalies visible | every vertical | workplace only |
+| anomalies visible | every vertical | logistics only |
 | `get_cost_by_account` on another vertical's account | allowed | refused, with the reason |
 
 A Vertical caller cannot take an action because the tool is never bound for that persona, so there is no instruction to argue with. Scope is checked again inside every query, the way a row access policy applies to every consumer. Binding the action tool for everyone fails the persona test.
 
-Refusals say why ("advisory is outside your verticals (workplace)"), and an unknown metric name answers with the metrics that do exist, so a caller can recover instead of guessing.
+Refusals say why ("advisory is outside your verticals (logistics)"), and an unknown metric name answers with the metrics that do exist, so a caller can recover instead of guessing.
 
 ## Continuous integration
 

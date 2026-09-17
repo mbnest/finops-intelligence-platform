@@ -5,7 +5,7 @@ import data.finops.guardrails
 # Same low-risk action as risk_test: it would run automatically unless a guardrail stops it.
 base_input := {
 	"action": {"type": "stop", "snapshot_available": true},
-	"target": {"resource_id": "aws-ec2-facilities-dev", "apm_id": "APM-1003", "environment": "nonprod", "blast_radius": 1},
+	"target": {"resource_id": "aws-ec2-support-dev", "apm_id": "APM-1003", "environment": "nonprod", "blast_radius": 1},
 	"contract": {"status": "active", "tier_scope": "LOW", "execution_mode": "live"},
 	"controls": {"automation_enabled": true},
 	"exclusions": [],
@@ -55,7 +55,7 @@ test_a_low_only_contract_cannot_pre_approve_a_medium_action if {
 test_an_excluded_resource_stays_advisory if {
 	excluded := object.union(base_input, {"exclusions": [{
 		"apm_id": "APM-1003",
-		"resource_id": "aws-ec2-facilities-dev",
+		"resource_id": "aws-ec2-support-dev",
 		"reason": "owner opted out during migration",
 	}]})
 	guardrails.execution == "advisory" with input as excluded

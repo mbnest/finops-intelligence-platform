@@ -13,15 +13,15 @@ This brief summarizes the full design in [FinOps Solution Overview.md](FinOps%20
 
 ## 1. The problem
 
-the organization runs a mature FinOps practice on thin tooling. What exists today:
+The organization runs a mature FinOps practice on thin tooling. What exists today:
 
-- **Strong discipline.** strong tagging, an APM ID on about nearly all of resources that Security and GRC also use, true chargeback, staggered 1- and 3-year commitments, and a top-quartile maturity rating from Microsoft.
+- **Strong discipline.** High tagging coverage, an APM ID on nearly all resources that Security and GRC also use, true chargeback, staggered 1- and 3-year commitments, and a top-quartile maturity assessment from a cloud provider.
 - **A monthly batch pipeline.** Billing files are pulled by PowerShell into an on-prem SQL Server, reconciled by stored procedures, and reported in Power BI. It can recommend, but not act.
 - **A small central team.** The team lead spends about half their time on operational work: stakeholder follow-ups, commitment planning, and PO handling.
 
 Three constraints shape the design:
 
-1. **The team lead retires in the end of the year** (known). The lead built the pipeline, so much of its business logic lives only in that code and in the lead's head. Their operational load falls to whoever remains.
+1. **The team lead retires at the end of the year** (known). The lead built the pipeline, so much of its business logic lives only in that code and in the lead's head. Their operational load falls to whoever remains.
 2. **Snowflake is the organization's data platform standard** (known), and the organization is consolidating onto it.
 3. **The role is one principal engineer**, expected to cover data engineering, ML, APIs, ontology and graph, and agentic AI. The platform has to be buildable and operable by roughly one person, and survive that person moving on.
 
@@ -72,14 +72,14 @@ flowchart LR
 | Cap generation spend per tenant, and cache prompts rather than meanings | Generation is the platform's only unbounded per-request cost. Budgets per persona and vertical refuse politely and predictably; a semantic cache would risk serving one vertical's number to another | Cloud Workbench ADR-010 |
 | Enforce personas in the agent's graph, not its prompt | Verticals can't call action tools in chat because the tools aren't bound, not because the model was told not to | Cloud Workbench ADR-007 |
 | Provider-agnostic LLM interface with an eval bake-off | Azure OpenAI to start; the final model per task is chosen with the same eval set that gates every change | Cloud Workbench ADR-004 |
-| Snowflake with a documented exit | the organization's standard; Iceberg tables and a portability table keep a future platform change to re-implementing services, not migrating data | Data Foundations ADR-003 |
+| Snowflake with a documented exit | The organization's standard; Iceberg tables and a portability table keep a future platform change to re-implementing services, not migrating data | Data Foundations ADR-003 |
 
 ## 4. Operating model
 
 The platform is sized for one engineer:
 
 1. **Managed over self-hosted.** No platform-owned Kubernetes cluster, and no self-hosted database, workflow engine, scheduler, or cache.
-2. **One of each kind.** One data platform, one scheduler (Snowflake Tasks), one operational database (managed Postgres), one container host (the organization's CMP), one observability backend (Datadog).
+2. **One of each kind.** One data platform, one scheduler (Snowflake Tasks), one operational database (managed Postgres), one container host (the organization's container platform, CMP), one observability backend (Datadog).
 3. **Introduced when first needed.** Temporal arrives with Phase 3; a graph database only on its trigger.
 4. **Everything as code.** Terraform, dbt, policies, the ontology, and eval sets are versioned and reviewed.
 

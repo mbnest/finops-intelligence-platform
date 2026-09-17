@@ -5,7 +5,7 @@ import data.finops.guardrails
 # An idle non-production VM with a snapshot available: the low-risk case automation exists for.
 low_risk_input := {
 	"action": {"type": "stop", "snapshot_available": true},
-	"target": {"resource_id": "aws-ec2-facilities-dev", "apm_id": "APM-1003", "environment": "nonprod", "blast_radius": 1},
+	"target": {"resource_id": "aws-ec2-support-dev", "apm_id": "APM-1003", "environment": "nonprod", "blast_radius": 1},
 	"contract": {"status": "active", "tier_scope": "LOW", "execution_mode": "live"},
 	"controls": {"automation_enabled": true},
 	"exclusions": [],

@@ -27,13 +27,13 @@ This document comes from informal conversation, not system access, architecture 
 
 ## Executive Summary
 
-The organization runs a self-built FinOps practice on SQL Server and Power BI, covering AWS, Azure, and GCP. Cost and usage files are pulled from each cloud, loaded into a local SQL Server database with PowerShell and stored procedures, reconciled against the enterprise Application Portfolio Management (APM) ID, and rolled up into Power BI reports. On a cadence believed to be monthly, the FinOps team reviews anomalies, reports forecast and budget against actuals, and makes advisory rightsizing recommendations, ending in chargeback to owning departments one month in arrears. Tagging coverage is strong (strong), and the practice does true chargeback, not showback. Both are signs of maturity. Microsoft has rated the organization in the top quartile of enterprises it has assessed for FinOps maturity, though the basis for that score isn't fully known.
+The organization runs a self-built FinOps practice on SQL Server and Power BI, covering AWS, Azure, and GCP. Cost and usage files are pulled from each cloud, loaded into a local SQL Server database with PowerShell and stored procedures, reconciled against the enterprise Application Portfolio Management (APM) ID, and rolled up into Power BI reports. On a cadence believed to be monthly, the FinOps team reviews anomalies, reports forecast and budget against actuals, and makes advisory rightsizing recommendations, ending in chargeback to owning departments one month in arrears. Tagging coverage is strong, and the practice does true chargeback, not showback. Both are signs of maturity. A cloud provider has rated the organization in the top quartile of enterprises it has assessed for FinOps maturity, though the basis for that score isn't fully known.
 
 The practice is process-mature but light on tooling. Most of what a modern FinOps platform automates (continuous ingestion, anomaly alerting, rightsizing enforcement, unit economics) is done manually or semi-manually on a monthly cycle, by a team that can recommend but not act on its own findings.
 
 ## External Maturity Benchmark
 
-Microsoft has told the organization it ranks in the **top quartile** for FinOps maturity among the enterprises Microsoft has worked with.
+A cloud provider has told the organization that its FinOps maturity ranks in the **top quartile** among the enterprises that provider works with.
 
 Treat this as directional context, not a validated capability assessment, for three reasons:
 
@@ -56,8 +56,8 @@ No orchestration framework (such as Airflow or ADF), lakehouse layer, or native 
 
 ## Cloud Metadata & Tagging
 
-- **Tagging coverage:** strong of resources across all three clouds carry the 8 baseline tags.
-- **APM ID coverage:** roughly nearly all of resources carry a resolvable APM ID, per the same conversation. That is higher than the strong figure for all 8 tags, since not every resource carries all 8.
+- **Tagging coverage:** the large majority of resources across all three clouds carry the 8 baseline tags.
+- **APM ID coverage:** nearly all resources carry a resolvable APM ID, per the same conversation. That is higher than the figure for all 8 tags, since not every resource carries all 8.
 - **Application Portfolio ID (APM ID):** one of the 8 tags. It links each resource to the enterprise Application Portfolio Management (APM) tool, which holds application metadata, ownership, and points of contact. Data, risk, and compliance classification is *assumed* to live there too; not confirmed.
 - **Cross-functional reuse:** Security and GRC use the same APM IDs for their own reviews and audits. That is a real architectural asset: cost, security, and compliance already share one resource identity key.
 
@@ -84,7 +84,7 @@ AWS / Azure / GCP billing & usage files
 
 A 2-person team does everything in this section: improving the tooling, generating and distributing reports, answering ad hoc questions from business verticals, and the proactive analysis (anomaly review, rightsizing, forecasting) described below. This comes from conversation, not a confirmed org chart. The team lead spends roughly half their time on operational work (stakeholder follow-ups, RI/commitment planning and laddering, PO handling), leaving the other half for proactive analysis. Not confirmed: the second team member's time split, or whether anyone outside the team helps.
 
-**Known staffing change:** the team lead, who also built the SQL Server/PowerShell pipeline, retires in the end of the year. Two things leave with them. The roughly 50% operational load above falls to whoever remains or replaces them. And much of the pipeline's business logic (reconciliation rules, APM matching, anomaly flags, chargeback allocation) likely exists only in that code and in the lead's knowledge. The organization is hiring a principal engineer to modernize the platform, which suggests the remaining staff aren't expected to take on modern data, ML, and agentic work alone.
+**Known staffing change:** the team lead, who also built the SQL Server/PowerShell pipeline, retires at the end of the year. Two things leave with them. The roughly 50% operational load above falls to whoever remains or replaces them. And much of the pipeline's business logic (reconciliation rules, APM matching, anomaly flags, chargeback allocation) likely exists only in that code and in the lead's knowledge. The organization is hiring a principal engineer to modernize the platform, which suggests the remaining staff aren't expected to take on modern data, ML, and agentic work alone.
 
 ### Reporting Process
 1. **Data Verification**: manual review of cloud vendor data for accuracy.
@@ -112,7 +112,7 @@ What to validate before treating this document as authoritative, in priority ord
 
 | Item | Why it matters |
 |---|---|
-| Business rules embedded in the legacy stored procedures and PowerShell scripts | Their author retires in the end of the year, so they need to be written down and turned into tests before then (Solution Overview, migration step 0a) |
+| Business rules embedded in the legacy stored procedures and PowerShell scripts | Their author retires at the end of the year, so they need to be written down and turned into tests before then (Solution Overview, migration step 0a) |
 | Actual data pull/refresh cadence (daily vs. monthly) | Determines how current the target platform needs to be; the biggest open assumption here |
 | Who owns reconciliation verification | Unclear today, for a step that affects chargeback accuracy |
 | What tooling supports rightsizing recommendations | "Other tools" or "working with cloud engineers" isn't specific enough to design an integration |

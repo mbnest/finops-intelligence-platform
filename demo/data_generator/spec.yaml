@@ -41,33 +41,33 @@ services:
     gcs: {name: Cloud Storage, category: Storage, unit: GB-Day}
 
 verticals:
-  - {vertical_id: advisory, vertical_name: Retail, cost_center: CC-100}
-  - {vertical_id: workplace, vertical_name: Logistics, cost_center: CC-200}
-  - {vertical_id: investments, vertical_name: Finance Systems, cost_center: CC-300}
-  - {vertical_id: project_mgmt, vertical_name: Project Management, cost_center: CC-400}
+  - {vertical_id: retail, vertical_name: Retail, cost_center: CC-100}
+  - {vertical_id: logistics, vertical_name: Logistics, cost_center: CC-200}
+  - {vertical_id: finance, vertical_name: Finance Systems, cost_center: CC-300}
+  - {vertical_id: delivery, vertical_name: Delivery Services, cost_center: CC-400}
   - {vertical_id: corporate, vertical_name: Corporate Technology, cost_center: CC-900}
 
 # Sub-accounts (AWS accounts, Azure subscriptions, GCP projects). The account decides the vertical.
 accounts:
-  - {account_id: aws-111111111111, provider: aws, account_name: advisory-prod, vertical_id: advisory}
-  - {account_id: aws-222222222222, provider: aws, account_name: workplace-prod, vertical_id: workplace}
+  - {account_id: aws-111111111111, provider: aws, account_name: retail-prod, vertical_id: retail}
+  - {account_id: aws-222222222222, provider: aws, account_name: logistics-prod, vertical_id: logistics}
   - {account_id: aws-333333333333, provider: aws, account_name: corporate-data, vertical_id: corporate}
-  - {account_id: az-sub-investments, provider: azure, account_name: investments, vertical_id: investments}
-  - {account_id: az-sub-projects, provider: azure, account_name: projects, vertical_id: project_mgmt}
+  - {account_id: az-sub-finance, provider: azure, account_name: finance, vertical_id: finance}
+  - {account_id: az-sub-delivery, provider: azure, account_name: projects, vertical_id: delivery}
   - {account_id: az-sub-corporate, provider: azure, account_name: corporate, vertical_id: corporate}
-  - {account_id: gcp-proj-workplace, provider: gcp, account_name: workplace-ops, vertical_id: workplace}
-  - {account_id: gcp-proj-analytics, provider: gcp, account_name: portfolio-analytics, vertical_id: investments}
+  - {account_id: gcp-proj-logistics, provider: gcp, account_name: logistics-ops, vertical_id: logistics}
+  - {account_id: gcp-proj-usage, provider: gcp, account_name: usage-analytics, vertical_id: finance}
 
 # APM applications. Owner and secondary approver are the contract signers in step 4.
 applications:
-  - {apm_id: APM-1001, name: Order Pipeline, vertical_id: advisory, owner: owner.1001@example.com, secondary_approver: approver.1001@example.com}
-  - {apm_id: APM-1002, name: Pricing Engine, vertical_id: advisory, owner: owner.1002@example.com, secondary_approver: approver.1002@example.com}
-  - {apm_id: APM-1003, name: Support Portal, vertical_id: workplace, owner: owner.1003@example.com, secondary_approver: approver.1003@example.com}
-  - {apm_id: APM-1004, name: Dispatch Service, vertical_id: workplace, owner: owner.1004@example.com, secondary_approver: approver.1004@example.com}
-  - {apm_id: APM-1005, name: Usage Analytics, vertical_id: investments, owner: owner.1005@example.com, secondary_approver: approver.1005@example.com}
-  - {apm_id: APM-1006, name: Financial Reporting, vertical_id: investments, owner: owner.1006@example.com, secondary_approver: approver.1006@example.com}
-  - {apm_id: APM-1007, name: Project Tracker, vertical_id: project_mgmt, owner: owner.1007@example.com, secondary_approver: approver.1007@example.com}
-  - {apm_id: APM-1008, name: Cost Estimator, vertical_id: project_mgmt, owner: owner.1008@example.com, secondary_approver: approver.1008@example.com}
+  - {apm_id: APM-1001, name: Order Pipeline, vertical_id: retail, owner: owner.1001@example.com, secondary_approver: approver.1001@example.com}
+  - {apm_id: APM-1002, name: Pricing Engine, vertical_id: retail, owner: owner.1002@example.com, secondary_approver: approver.1002@example.com}
+  - {apm_id: APM-1003, name: Support Portal, vertical_id: logistics, owner: owner.1003@example.com, secondary_approver: approver.1003@example.com}
+  - {apm_id: APM-1004, name: Dispatch Service, vertical_id: logistics, owner: owner.1004@example.com, secondary_approver: approver.1004@example.com}
+  - {apm_id: APM-1005, name: Usage Analytics, vertical_id: finance, owner: owner.1005@example.com, secondary_approver: approver.1005@example.com}
+  - {apm_id: APM-1006, name: Financial Reporting, vertical_id: finance, owner: owner.1006@example.com, secondary_approver: approver.1006@example.com}
+  - {apm_id: APM-1007, name: Project Tracker, vertical_id: delivery, owner: owner.1007@example.com, secondary_approver: approver.1007@example.com}
+  - {apm_id: APM-1008, name: Cost Estimator, vertical_id: delivery, owner: owner.1008@example.com, secondary_approver: approver.1008@example.com}
   - {apm_id: APM-1009, name: Identity Hub, vertical_id: corporate, owner: owner.1009@example.com, secondary_approver: approver.1009@example.com}
   - {apm_id: APM-1010, name: Data Lake Ops, vertical_id: corporate, owner: owner.1010@example.com, secondary_approver: approver.1010@example.com}
 
@@ -77,39 +77,39 @@ applications:
 # start and end (inclusive) bound a resource's life; omitted means the whole range.
 resources:
   # AWS
-  - {resource_id: aws-ec2-deal-api, account_id: aws-111111111111, apm_id: APM-1001, environment: prod, service: ec2, sku: m6i.xlarge, list_price: 0.192, qty: 480, noise: 0.03, cpu: 45}
-  - {resource_id: aws-rds-deal-db, account_id: aws-111111111111, apm_id: APM-1001, environment: prod, service: rds, sku: db.r6g.large, list_price: 0.225, qty: 48, noise: 0.01}
-  - {resource_id: aws-s3-deal-docs, account_id: aws-111111111111, apm_id: APM-1001, environment: prod, service: s3, sku: s3-standard, list_price: 0.000767, qty: 60000, noise: 0.005}
-  - {resource_id: aws-ec2-valuation-workers, account_id: aws-111111111111, apm_id: APM-1002, environment: prod, service: ec2, sku: r6i.2xlarge, list_price: 0.504, qty: 720, noise: 0.04, cpu: 55}
-  - {resource_id: aws-ec2-valuation-legacy, account_id: aws-111111111111, apm_id: APM-1002, environment: prod, service: ec2, sku: m6i.large, list_price: 0.096, qty: 48, noise: 0.01, cpu: 2.5}
-  - {resource_id: aws-rds-valuation-db, account_id: aws-111111111111, apm_id: APM-1002, environment: prod, service: rds, sku: db.r6g.xlarge, list_price: 0.45, qty: 48, noise: 0.01}
-  - {resource_id: aws-ec2-facilities-web, account_id: aws-222222222222, apm_id: APM-1003, environment: prod, service: ec2, sku: m6i.xlarge, list_price: 0.192, qty: 240, noise: 0.03, cpu: 38}
-  - {resource_id: aws-ec2-facilities-dev, account_id: aws-222222222222, apm_id: APM-1003, environment: nonprod, service: ec2, sku: m6i.large, list_price: 0.096, qty: 72, noise: 0.01, cpu: 2}
-  - {resource_id: aws-rds-facilities-db, account_id: aws-222222222222, apm_id: APM-1003, environment: prod, service: rds, sku: db.t4g.large, list_price: 0.129, qty: 24, noise: 0.01}
-  - {resource_id: aws-s3-facilities-assets, account_id: aws-222222222222, apm_id: APM-1003, environment: prod, service: s3, sku: s3-standard, list_price: 0.000767, qty: 25000, noise: 0.005}
+  - {resource_id: aws-ec2-order-api, account_id: aws-111111111111, apm_id: APM-1001, environment: prod, service: ec2, sku: m6i.xlarge, list_price: 0.192, qty: 480, noise: 0.03, cpu: 45}
+  - {resource_id: aws-rds-order-db, account_id: aws-111111111111, apm_id: APM-1001, environment: prod, service: rds, sku: db.r6g.large, list_price: 0.225, qty: 48, noise: 0.01}
+  - {resource_id: aws-s3-order-docs, account_id: aws-111111111111, apm_id: APM-1001, environment: prod, service: s3, sku: s3-standard, list_price: 0.000767, qty: 60000, noise: 0.005}
+  - {resource_id: aws-ec2-pricing-workers, account_id: aws-111111111111, apm_id: APM-1002, environment: prod, service: ec2, sku: r6i.2xlarge, list_price: 0.504, qty: 720, noise: 0.04, cpu: 55}
+  - {resource_id: aws-ec2-pricing-legacy, account_id: aws-111111111111, apm_id: APM-1002, environment: prod, service: ec2, sku: m6i.large, list_price: 0.096, qty: 48, noise: 0.01, cpu: 2.5}
+  - {resource_id: aws-rds-pricing-db, account_id: aws-111111111111, apm_id: APM-1002, environment: prod, service: rds, sku: db.r6g.xlarge, list_price: 0.45, qty: 48, noise: 0.01}
+  - {resource_id: aws-ec2-support-web, account_id: aws-222222222222, apm_id: APM-1003, environment: prod, service: ec2, sku: m6i.xlarge, list_price: 0.192, qty: 240, noise: 0.03, cpu: 38}
+  - {resource_id: aws-ec2-support-dev, account_id: aws-222222222222, apm_id: APM-1003, environment: nonprod, service: ec2, sku: m6i.large, list_price: 0.096, qty: 72, noise: 0.01, cpu: 2}
+  - {resource_id: aws-rds-support-db, account_id: aws-222222222222, apm_id: APM-1003, environment: prod, service: rds, sku: db.t4g.large, list_price: 0.129, qty: 24, noise: 0.01}
+  - {resource_id: aws-s3-support-assets, account_id: aws-222222222222, apm_id: APM-1003, environment: prod, service: s3, sku: s3-standard, list_price: 0.000767, qty: 25000, noise: 0.005}
   - {resource_id: aws-ec2-datalake-etl, account_id: aws-333333333333, apm_id: APM-1010, environment: prod, service: ec2, sku: c6i.2xlarge, list_price: 0.34, qty: 96, noise: 0.05, cpu: 60}
   - {resource_id: aws-s3-datalake-raw, account_id: aws-333333333333, apm_id: APM-1010, environment: prod, service: s3, sku: s3-standard, list_price: 0.000767, qty: 250000, noise: 0.01}
   - {resource_id: aws-ec2-untagged-01, account_id: aws-333333333333, apm_id: null, environment: null, service: ec2, sku: t3.large, list_price: 0.0832, qty: 24, noise: 0.01, cpu: 12}
   # Azure
-  - {resource_id: az-vm-fund-reporting-app, account_id: az-sub-investments, apm_id: APM-1006, environment: prod, service: vm, sku: E8s_v5, list_price: 0.504, qty: 240, noise: 0.03, cpu: 50}
-  - {resource_id: az-sql-fund-reporting-db, account_id: az-sub-investments, apm_id: APM-1006, environment: prod, service: sql, sku: GP_Gen5_4, list_price: 0.73, qty: 24, noise: 0.01}
-  - {resource_id: az-storage-fund-archive, account_id: az-sub-investments, apm_id: APM-1006, environment: prod, service: storage, sku: hot-lrs, list_price: 0.000613, qty: 80000, noise: 0.005}
-  - {resource_id: az-vm-projecttracker-web, account_id: az-sub-projects, apm_id: APM-1007, environment: prod, service: vm, sku: D4s_v5, list_price: 0.192, qty: 144, noise: 0.02, cpu: 35, end: "2026-05-15"}
-  - {resource_id: az-vm-projecttracker-test, account_id: az-sub-projects, apm_id: APM-1007, environment: nonprod, service: vm, sku: D2s_v5, list_price: 0.096, qty: 48, noise: 0.01, cpu: 3}
-  - {resource_id: az-sql-costestimator-db, account_id: az-sub-projects, apm_id: APM-1008, environment: prod, service: sql, sku: GP_Gen5_2, list_price: 0.365, qty: 24, noise: 0.02}
-  - {resource_id: az-vm-costestimator-app, account_id: az-sub-projects, apm_id: APM-1008, environment: prod, service: vm, sku: D4s_v5, list_price: 0.192, qty: 72, noise: 0.03, cpu: 30}
+  - {resource_id: az-vm-finance-reporting-app, account_id: az-sub-finance, apm_id: APM-1006, environment: prod, service: vm, sku: E8s_v5, list_price: 0.504, qty: 240, noise: 0.03, cpu: 50}
+  - {resource_id: az-sql-finance-reporting-db, account_id: az-sub-finance, apm_id: APM-1006, environment: prod, service: sql, sku: GP_Gen5_4, list_price: 0.73, qty: 24, noise: 0.01}
+  - {resource_id: az-storage-finance-archive, account_id: az-sub-finance, apm_id: APM-1006, environment: prod, service: storage, sku: hot-lrs, list_price: 0.000613, qty: 80000, noise: 0.005}
+  - {resource_id: az-vm-projecttracker-web, account_id: az-sub-delivery, apm_id: APM-1007, environment: prod, service: vm, sku: D4s_v5, list_price: 0.192, qty: 144, noise: 0.02, cpu: 35, end: "2026-05-15"}
+  - {resource_id: az-vm-projecttracker-test, account_id: az-sub-delivery, apm_id: APM-1007, environment: nonprod, service: vm, sku: D2s_v5, list_price: 0.096, qty: 48, noise: 0.01, cpu: 3}
+  - {resource_id: az-sql-costestimator-db, account_id: az-sub-delivery, apm_id: APM-1008, environment: prod, service: sql, sku: GP_Gen5_2, list_price: 0.365, qty: 24, noise: 0.02}
+  - {resource_id: az-vm-costestimator-app, account_id: az-sub-delivery, apm_id: APM-1008, environment: prod, service: vm, sku: D4s_v5, list_price: 0.192, qty: 72, noise: 0.03, cpu: 30}
   - {resource_id: az-vm-identityhub, account_id: az-sub-corporate, apm_id: APM-1009, environment: prod, service: vm, sku: D4s_v5, list_price: 0.192, qty: 96, noise: 0.02, cpu: 25}
   - {resource_id: az-sql-identityhub-db, account_id: az-sub-corporate, apm_id: APM-1009, environment: prod, service: sql, sku: GP_Gen5_2, list_price: 0.365, qty: 24, noise: 0.01}
   - {resource_id: az-storage-shared-01, account_id: az-sub-corporate, apm_id: null, environment: null, service: storage, sku: hot-lrs, list_price: 0.000613, qty: 40000, noise: 0.005}
   # GCP
-  - {resource_id: gcp-gce-workorder-api, account_id: gcp-proj-workplace, apm_id: APM-1004, environment: prod, service: compute, sku: n2-standard-4, list_price: 0.194, qty: 168, noise: 0.03, cpu: 40}
-  - {resource_id: gcp-gce-workorder-workers, account_id: gcp-proj-workplace, apm_id: APM-1004, environment: prod, service: compute, sku: n2-standard-8, list_price: 0.388, qty: 96, noise: 0.03, cpu: 50}
-  - {resource_id: gcp-sql-workorder-db, account_id: gcp-proj-workplace, apm_id: APM-1004, environment: prod, service: cloudsql, sku: db-custom-4-16, list_price: 0.40, qty: 24, noise: 0.01}
-  - {resource_id: gcp-gcs-workorder-files, account_id: gcp-proj-workplace, apm_id: APM-1004, environment: prod, service: gcs, sku: standard, list_price: 0.000667, qty: 30000, noise: 0.005}
-  - {resource_id: gcp-gce-portfolio-analytics, account_id: gcp-proj-analytics, apm_id: APM-1005, environment: prod, service: compute, sku: n2-highmem-8, list_price: 0.524, qty: 192, noise: 0.04, cpu: 65}
-  - {resource_id: gcp-gce-portfolio-sandbox, account_id: gcp-proj-analytics, apm_id: APM-1005, environment: nonprod, service: compute, sku: n2-standard-4, list_price: 0.194, qty: 24, noise: 0.01, cpu: 1.5}
-  - {resource_id: gcp-gce-portfolio-ml-training, account_id: gcp-proj-analytics, apm_id: APM-1005, environment: prod, service: compute, sku: a2-highgpu-1g, list_price: 3.67, qty: 48, noise: 0.05, cpu: 70, start: "2026-06-01"}
-  - {resource_id: gcp-gcs-portfolio-lake, account_id: gcp-proj-analytics, apm_id: APM-1005, environment: prod, service: gcs, sku: standard, list_price: 0.000667, qty: 150000, noise: 0.01}
+  - {resource_id: gcp-gce-dispatch-api, account_id: gcp-proj-logistics, apm_id: APM-1004, environment: prod, service: compute, sku: n2-standard-4, list_price: 0.194, qty: 168, noise: 0.03, cpu: 40}
+  - {resource_id: gcp-gce-dispatch-workers, account_id: gcp-proj-logistics, apm_id: APM-1004, environment: prod, service: compute, sku: n2-standard-8, list_price: 0.388, qty: 96, noise: 0.03, cpu: 50}
+  - {resource_id: gcp-sql-dispatch-db, account_id: gcp-proj-logistics, apm_id: APM-1004, environment: prod, service: cloudsql, sku: db-custom-4-16, list_price: 0.40, qty: 24, noise: 0.01}
+  - {resource_id: gcp-gcs-dispatch-files, account_id: gcp-proj-logistics, apm_id: APM-1004, environment: prod, service: gcs, sku: standard, list_price: 0.000667, qty: 30000, noise: 0.005}
+  - {resource_id: gcp-gce-usage-analytics, account_id: gcp-proj-usage, apm_id: APM-1005, environment: prod, service: compute, sku: n2-highmem-8, list_price: 0.524, qty: 192, noise: 0.04, cpu: 65}
+  - {resource_id: gcp-gce-usage-sandbox, account_id: gcp-proj-usage, apm_id: APM-1005, environment: nonprod, service: compute, sku: n2-standard-4, list_price: 0.194, qty: 24, noise: 0.01, cpu: 1.5}
+  - {resource_id: gcp-gce-usage-ml-training, account_id: gcp-proj-usage, apm_id: APM-1005, environment: prod, service: compute, sku: a2-highgpu-1g, list_price: 3.67, qty: 48, noise: 0.05, cpu: 70, start: "2026-06-01"}
+  - {resource_id: gcp-gcs-usage-lake, account_id: gcp-proj-usage, apm_id: APM-1005, environment: prod, service: gcs, sku: standard, list_price: 0.000667, qty: 150000, noise: 0.01}
 
 # Account-level charges with no resource_id, on the first day of each billing period.
 account_charges:
@@ -131,7 +131,7 @@ commitments:
     daily_commitment: 252.0
     start_date: "2025-10-01"
     end_date: "2028-09-30"
-    covers: [aws-ec2-deal-api, aws-ec2-valuation-workers, aws-ec2-facilities-web]
+    covers: [aws-ec2-order-api, aws-ec2-pricing-workers, aws-ec2-support-web]
   - commitment_discount_id: ri-az-vm-001
     provider: azure
     commitment_type: Reservation
@@ -142,7 +142,7 @@ commitments:
     daily_commitment: 90.0
     start_date: "2025-12-01"
     end_date: "2026-11-30"
-    covers: [az-vm-fund-reporting-app, az-vm-projecttracker-web, az-vm-identityhub]
+    covers: [az-vm-finance-reporting-app, az-vm-projecttracker-web, az-vm-identityhub]
 
 # Restatements: a later delivery for a billing period that changes prices. Every other period has one delivery.
 # Delivery 2 re-sends the whole period; only the listed service's contracted price changes (list price does not).
@@ -156,12 +156,12 @@ restatements:
 anomalies:
   - {anomaly_id: GT-001, kind: spike, resource_id: aws-ec2-datalake-etl, start: "2026-05-12", duration_days: 1, factor: 6.0}
   - {anomaly_id: GT-002, kind: step, resource_id: az-sql-costestimator-db, start: "2026-06-03", factor: 1.8}
-  - {anomaly_id: GT-003, kind: ramp, resource_id: gcp-gce-workorder-workers, start: "2026-05-20", duration_days: 25, daily_increase: 0.04}
+  - {anomaly_id: GT-003, kind: ramp, resource_id: gcp-gce-dispatch-workers, start: "2026-05-20", duration_days: 25, daily_increase: 0.04}
 
 # Expected changes: real cost changes that are not anomalies. Also written to ground truth, labeled is_anomaly false,
 # so the eval gate can count them as false positives if flagged.
 expected_changes:
-  - {change_id: EC-001, kind: new_resource, resource_id: gcp-gce-portfolio-ml-training, start: "2026-06-01"}
+  - {change_id: EC-001, kind: new_resource, resource_id: gcp-gce-usage-ml-training, start: "2026-06-01"}
   - {change_id: EC-002, kind: removed_resource, resource_id: az-vm-projecttracker-web, start: "2026-05-16"}
 
 # Daily CPU utilization: cpu from each resource, plus normal noise with this standard deviation, clipped to 0-100.

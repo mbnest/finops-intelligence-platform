@@ -15,7 +15,7 @@ QUERIES = [
          round(list_cost, 2) as list_cost, round(contracted_cost, 2) as contracted_cost,
          round(billed_cost, 2) as billed_cost, round(effective_cost, 2) as effective_cost
      from gold.fact_cost_daily
-     where resource_id = 'aws-ec2-valuation-workers' and date = '2026-05-12'
+     where resource_id = 'aws-ec2-pricing-workers' and date = '2026-05-12'
      order by pricing_category
      """),
     ("2. A restated billing period keeps one delivery",
@@ -45,7 +45,7 @@ QUERIES = [
      """),
     ("4. Why did this vertical's bill change?",
      "The month-over-month change is split into causes that sum exactly to it: a new GPU resource in "
-     "investments in June, a removed resource in project management, usage change, and price change "
+     "finance in June, a removed resource in project management, usage change, and price change "
      "(the May restatement).",
      """
      select billing_period, vertical_id,
@@ -54,7 +54,7 @@ QUERIES = [
          round(removed_resources, 1) as removed_resources, round(usage_change, 1) as usage_change,
          round(price_change, 1) as price_change, round(other_change, 1) as other_change
      from semantic.metric_spend_variance_mom
-     where vertical_id in ('investments', 'project_mgmt')
+     where vertical_id in ('finance', 'delivery')
      order by billing_period, vertical_id
      """),
 ]

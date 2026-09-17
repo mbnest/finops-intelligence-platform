@@ -13,7 +13,7 @@ This document lists opportunities to extend the FinOps practice described in [Fi
 
 It comes from the same outside-in view as the current-state document: an informed set of opportunities, not a confirmed backlog. It is likely incomplete or wrong in places and should be corrected once validated from the inside.
 
-**On framing:** the practice in the current-state document (strong tagging coverage, true chargeback, an APM ID shared across cost, security, and GRC, year-round commitment laddering) reflects years of discipline, and Microsoft's top-quartile maturity rating supports that. Nothing below fixes something broken. Every opportunity is an *addition to* that foundation, aimed at the tier most enterprises, including mature ones, haven't reached.
+**On framing:** the practice in the current-state document (strong tagging coverage, true chargeback, an APM ID shared across cost, security, and GRC, year-round commitment laddering) reflects years of discipline, and a cloud provider's top-quartile maturity rating supports that. Nothing below fixes something broken. Every opportunity is an *addition to* that foundation, aimed at the tier most enterprises, including mature ones, haven't reached.
 
 The document has two parts: **technology stack and architecture** (the platform under the practice) and **FinOps process and practice** (what the practice does). The work spans both. Mixing them tends to produce either infrastructure with no outcome or process with no platform.
 
@@ -49,7 +49,7 @@ Ways to deepen the analyses the practice already does.
 - **Unit economics** (cost per transaction, service, or customer) on top of the existing resource-group and account rollups.
 - **ML-assisted analysis** for anomaly detection, rightsizing, and RI/savings-plan planning, supporting the team's forecasting, anomaly review, and rightsizing work. It informs their judgment; it doesn't replace it.
 - **Continuous commitment coverage and utilization tracking** to support the existing 1-year/3-year laddering between periodic reviews.
-- **APM ID resolution rate as a trended governance KPI.** Track the share of resources linked to an APM ID over time (about nearly all today, per the current-state document), and separately track how stale the owner and contact fields under it are. That turns an assumption into a measurement and gives early warning if coverage slips.
+- **APM ID resolution rate as a trended governance KPI.** Track the share of resources linked to an APM ID over time (nearly all resources today, per the current-state document), and separately track how stale the owner and contact fields under it are. That turns an assumption into a measurement and gives early warning if coverage slips.
 - **Tracking the platform's own cost.** If a GenAI or ML layer is added, track its compute and token spend as rigorously as the cloud spend it analyzes. A FinOps platform that doesn't measure its own cost loses credibility.
 
 ### 2b. Self-Serve Channels & Personas
@@ -64,7 +64,7 @@ Design self-serve around two personas with different access and needs:
 | Standard reports/dashboards | Platform + Vertical | An always-available view of current spend and chargeback position, instead of waiting for the monthly report |
 | Conversational interface (chatbot) | Platform + Vertical | The GenAI interface from Part 1: ask in natural language instead of requesting a report |
 | Published REST APIs | Internal teams and tools | The governed API from Part 1, for programmatic use outside a UI |
-| FinOps signals embedded in existing platforms (push) | Vertical | Cost, anomaly, and recommendation signals shown inside IDP, CMP, Internal Assistant, or wherever verticals already work |
+| FinOps signals embedded in existing platforms (push) | Vertical | Cost, anomaly, and recommendation signals shown inside IDP (the infrastructure deployment platform), CMP (the container management platform), Internal Assistant (an existing chat tool), or wherever verticals already work |
 | Vertical self-serve workbench with what-if analysis (pull) | Vertical (built and run by the horizontal team) | A vertical-facing product that brings existing tools (IDP, CMP, Internal Assistant), current and historical cost data, APM data, and other reference data into one place for scenario planning |
 
 **Push and pull as two front ends on one platform.** Build push (FinOps-initiated reports, suggestions, and automation delivered to verticals) and pull (a workbench verticals use for their own planning) as separate product surfaces, since one notifies and the other supports exploration. Back both with the *same* governed APIs, semantic layer, and knowledge graph from Part 1. A separately modeled workbench would risk fragmenting the shared APM ID that Security and GRC also depend on. Treat the IDP, CMP, and Internal Assistant integration as its own phase: combining live views from three platforms, each with its own authentication and data model, is much bigger work than a dashboard or chatbot.
@@ -120,7 +120,7 @@ Because it is keyed on the APM ID, the identity and ownership data likely exists
 
 **Policy review & enrichment likely needed**
 
-- Extend the 8-tag schema, or an APM-linked policy record, to capture risk tier, blast-radius classification, automation consent status, and the designated approver. This builds on a tagging practice already at strong coverage.
+- Extend the 8-tag schema, or an APM-linked policy record, to capture risk tier, blast-radius classification, automation consent status, and the designated approver. This builds on a tagging practice already at high coverage.
 - Evaluate a policy engine (per-provider tooling or a unified layer) to encode and enforce tier and contract rules. Check existing IaC and governance tooling first.
 - Clarify who writes and reviews policy. It is probably shared across FinOps, application owners, and Security/GRC, given the shared APM ID.
 - Review IAM boundaries. Automated remediation needs its own scoped, auditable identity, separate from human access.

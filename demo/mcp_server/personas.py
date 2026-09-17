@@ -32,7 +32,7 @@ def vertical_persona(*verticals):
 
 
 def from_environment():
-    """FINOPS_PERSONA=platform, or FINOPS_PERSONA=vertical with FINOPS_VERTICALS=workplace,advisory."""
+    """FINOPS_PERSONA=platform, or FINOPS_PERSONA=vertical with FINOPS_VERTICALS=logistics,retail."""
     if os.environ.get("FINOPS_PERSONA", "platform") == "platform":
         return PLATFORM
     verticals = [v.strip() for v in os.environ.get("FINOPS_VERTICALS", "").split(",") if v.strip()]

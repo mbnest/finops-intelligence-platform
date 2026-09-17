@@ -99,7 +99,7 @@ IDP and CMP are the organization's existing provisioning and container-managemen
 | Approval queue / workflow operational state | **Postgres** (managed: Azure Database for PostgreSQL, shared by the whole platform) | A transactional read-modify-write workload (create, list pending, approve or reject) that Snowflake isn't built for. See ADR-003 |
 | Audit trail (reporting copy) | Snowflake gold (`gold.fact_action_audit`) | Final records synced from Postgres and Temporal history, queryable with every other fact table |
 | Execution targets | IDP, CMP (existing, called through MCP tools) | This layer decides whether to call them; they do the provisioning and container work |
-| Infrastructure | CMP, Terraform | the organization's existing container platform, run by its platform team; no platform-owned cluster (Build Specification §8) |
+| Infrastructure | CMP, Terraform | The organization's existing container platform, run by its platform team; no platform-owned cluster (Build Specification §8) |
 
 ### 3.2 Determinism boundary: what the agent decides vs. what this layer decides
 

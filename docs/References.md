@@ -14,7 +14,7 @@ This document lists the vendor documentation behind the facts that drive decisio
 The document set draws on three kinds of source:
 
 1. **The job posting** (`docs/Systems Engineer Prin.md`, kept local and not committed): the role, the expected stack, and the organization's internal platforms (IDP, CMP, Internal Assistant).
-2. **An informal conversation**: the facts labeled "known" in [FinOps Current State.md](FinOps%20Current%20State.md), such as Snowflake as the organization's data platform standard, the team lead's the end of the year retirement, APM ID coverage of about nearly all, and Datadog being in use. These can't be linked.
+2. **An informal conversation**: the facts labeled "known" in [FinOps Current State.md](FinOps%20Current%20State.md), such as Snowflake as the organization's data platform standard, the team lead's retirement, high APM ID coverage, and Datadog being in use. These can't be linked.
 3. **Vendor documentation**: the tables below.
 
 Only claims a decision depends on are listed, and each was checked against the linked page on the date above. Anything not listed, including general descriptions of products like Temporal Cloud, Semantic Views, or Cortex Analyst, is working knowledge to confirm during implementation. Vendor behavior and product names change often; recheck an entry before relying on it.

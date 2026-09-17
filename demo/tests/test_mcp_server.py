@@ -20,7 +20,7 @@ from governed_automation.workflow import ProposeAction
 from mcp_server import personas
 from mcp_server.server import build_server
 
-WORKPLACE = personas.vertical_persona("workplace")
+WORKPLACE = personas.vertical_persona("logistics")
 
 
 async def tool_names(persona):
@@ -51,7 +51,7 @@ async def test_a_vertical_cannot_read_another_verticals_account():
 async def test_a_vertical_can_read_its_own_account():
     result = await build_server(WORKPLACE).call_tool("get_cost_by_account", {"account_id": "aws-222222222222"})
     body = payload(result)
-    assert body["vertical_id"] == "workplace"
+    assert body["vertical_id"] == "logistics"
     assert body["cost_basis"].startswith("effective_cost")
     assert len(body["periods"]) == 3
 
@@ -64,13 +64,13 @@ async def test_anomalies_are_filtered_to_the_callers_verticals():
     platform = await build_server(personas.PLATFORM).call_tool("get_anomalies", {"limit": 50})
     vertical = await build_server(WORKPLACE).call_tool("get_anomalies", {"limit": 50})
     assert len(verticals_in(platform)) > 1
-    assert verticals_in(vertical) == {"workplace"}
+    assert verticals_in(vertical) == {"logistics"}
 
 
 async def test_variance_is_filtered_to_the_callers_verticals():
     result = await build_server(WORKPLACE).call_tool("get_spend_variance", {"billing_period": "2026-06"})
     body = payload(result)
-    assert {row["vertical_id"] for row in body["verticals"]} == {"workplace"}
+    assert {row["vertical_id"] for row in body["verticals"]} == {"logistics"}
 
 
 async def test_a_metric_answer_carries_its_governed_definition():
@@ -98,7 +98,7 @@ async def test_proposing_an_action_goes_through_the_governed_harness():
         async with Worker(client, task_queue=config["task_queue"], workflows=[ProposeAction],
                           activities=ACTIVITIES, activity_executor=pool):
             result = await build_server(personas.PLATFORM).call_tool(
-                "propose_action", {"resource_id": "aws-ec2-facilities-dev"})
+                "propose_action", {"resource_id": "aws-ec2-support-dev"})
     body = payload(result)
     assert body["risk_tier"] == "LOW"
     assert body["outcome"] == "executed"
@@ -106,10 +106,10 @@ async def test_proposing_an_action_goes_through_the_governed_harness():
 
 async def test_proposing_an_action_outside_your_scope_is_refused():
     """Scope is checked even for a persona that does have the tool: binding is not a blank cheque."""
-    scoped_operator = personas.Persona(name="platform-workplace", verticals=("workplace",), can_propose_actions=True)
+    scoped_operator = personas.Persona(name="platform-logistics", verticals=("logistics",), can_propose_actions=True)
     server = build_server(scoped_operator)
     with pytest.raises(ToolError, match="outside your verticals"):
-        await server.call_tool("propose_action", {"resource_id": "gcp-gce-portfolio-sandbox"})
+        await server.call_tool("propose_action", {"resource_id": "gcp-gce-usage-sandbox"})
 
 
 async def test_an_unknown_resource_is_reported_clearly():
@@ -133,4 +133,4 @@ async def test_the_server_starts_over_stdio_for_each_persona():
 
     assert "propose_action" in await tools_over_stdio({"FINOPS_PERSONA": "platform"})
     assert "propose_action" not in await tools_over_stdio(
-        {"FINOPS_PERSONA": "vertical", "FINOPS_VERTICALS": "workplace"})
+        {"FINOPS_PERSONA": "vertical", "FINOPS_VERTICALS": "logistics"})
