@@ -23,7 +23,7 @@ This repository works through an ambiguous, high-stakes architecture problem fro
 
 ## Why
 
-The practice this platform modernizes is **process-mature but light on tooling**. It has real discipline (strong tagging coverage, true chargeback, an APM ID shared across cost, security, and GRC, and a top-quartile maturity assessment from a cloud provider) running on a monthly SQL Server and PowerShell pipeline that can recommend but not act. A small central team runs it, and the lead spends roughly half their time on operational work (stakeholder follow-ups, commitment planning, PO handling) that a governed platform could take on.
+The FinOps practice this platform modernizes is **process-mature but light on tooling**. It has real discipline (strong tagging coverage, true chargeback, an APM ID shared across cost, security, and GRC, and a top-quartile maturity assessment from a cloud provider) running on a monthly SQL Server and PowerShell pipeline that can recommend but not act. A small central team runs it, and the lead spends roughly half their time on operational work (stakeholder follow-ups, commitment planning, PO handling) that a governed platform could take on.
 
 "Governed" is doing real work in that sentence. Every delegated action, whether a model or a person proposes it, is classified by the same Guardrail Engine and executed by the same Orchestrator. The team gets time back because the harness makes delegation safe, not because the agent is trusted more.
 
