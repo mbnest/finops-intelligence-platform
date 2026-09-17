@@ -1,6 +1,6 @@
-# Solution Architecture: Cost Anomaly Detection, Rightsizing & RI/SP Modeling — MLOps Pipeline
+# Solution Architecture: Cost Anomaly Detection, Rightsizing & RI/SP Modeling (MLOps Pipeline)
 
-Phase 2 of the platform sequenced in `FinOps Solution Overview.md` — **Core Intelligence**, alongside Self-Serve Foundations' non-agentic API/dashboards (`Solution_Architecture_Self_Serve_Foundations.md`). This is a distinct discipline from the RAG/agentic self-serve work, which lives separately in `Solution_Architecture_Cloud_Workbench.md` (Phase 5, not Phase 2 — see `FinOps Solution Overview.md` ADR-M1), and was otherwise under-exercised across the prep material so far, so it gets its own dedicated document rather than a subsection of another one. Requirements and specifics below are **inferred** from JD language, not confirmed the organization fact.
+Phase 2 of the platform sequenced in `FinOps Solution Overview.md`: **Core Intelligence**, built alongside Self-Serve Foundations' non-agentic API and dashboards (`Solution_Architecture_Self_Serve_Foundations.md`). Classical ML is a separate discipline from the agentic self-serve work in `Solution_Architecture_Cloud_Workbench.md` (Phase 5, see ADR-M1 in `FinOps Solution Overview.md`), so it has its own document. Requirements below are **inferred** from the job description and are not confirmed the organization facts.
 
 ---
 
@@ -8,28 +8,28 @@ Phase 2 of the platform sequenced in `FinOps Solution Overview.md` — **Core In
 
 ### 1.1 Problem statement (inferred)
 
-Cloud spend across AWS, Azure, and GCP grows unpredictably; manual review of usage and billing data cannot catch anomalies or rightsizing opportunities at enterprise scale or speed. The platform needs models that proactively surface: (a) **cost anomalies** (unexpected spend spikes, deviation from historical patterns), (b) **rightsizing recommendations** (over-provisioned resources based on actual utilization), (c) **RI/savings-plan modeling** (whether reserved capacity commitments make financial sense given usage patterns), and (d) **bill verification** (reconciling invoiced line items against contracted rates and expected usage, reportedly a fully manual process today).
+Cloud spend across AWS, Azure, and GCP changes unpredictably, and manual review of usage and billing data can't catch anomalies or rightsizing opportunities at enterprise scale or speed. The platform needs to surface: (a) **cost anomalies** (unexpected spikes, departures from historical patterns), (b) **rightsizing recommendations** (over-provisioned resources, based on actual utilization), (c) **RI/savings-plan planning** (what commitments to buy given usage), and (d) **bill verification** (reconciling invoice lines against billing data, contract terms, and expected usage; reportedly manual today).
 
-> **Bill verification as exception-based review, not automation replacing the human.** The goal isn't removing the human from bill verification, it's shifting from 100% manual line-by-line review to automated reconciliation checks that produce a confidence score and attached evidence (matching contract clause, historical rate comparison, delta explanation) for each line item, so the human reviewer spends their time on genuinely ambiguous or high-value discrepancies instead of routine confirmation. Routing should combine confidence score with dollar-impact: high-confidence, low-impact items can auto-approve; low-confidence or high-dollar-impact items always route to a human, regardless of model confidence, the same hard-rule pattern already used for HIGH-risk infrastructure actions in Governed Automation.
+> **Bill verification as exception-based review.** The goal is not to remove the person from bill verification. It is to move from checking every line by hand to automated reconciliation that gives each line a confidence score and evidence, so the reviewer spends time on ambiguous or high-value discrepancies. Routing combines confidence with dollar impact: high-confidence, low-impact lines can clear automatically, and low-confidence or high-dollar lines always go to a person. That is the same fixed-rule pattern Governed Automation uses for HIGH-risk actions.
 >
-> **Assumption adopted:** Current State describes this step as manual review, not scored logic, so today's check is assumed to be a true pass/fail (or fully manual) with no existing confidence-scoring behavior. This model is therefore genuinely net-new — not a productionization of something the stored procedures already approximate.
+> **Assumption adopted:** Current State describes this step as manual review, so today's check is assumed to be manual or pass/fail, with no scoring. The capability is new, not a rebuild of something the stored procedures already approximate.
 
-> **Scope boundary.** This document provides full requirements, architecture, and ADRs for (a), (b), and (c) above — anomaly detection, rightsizing, and RI/savings-plan modeling. Bill verification (d) originated as a problem statement here; it shares the same confidence-scored, hard-rule-routed pattern (see the callout above, and ADR-M4 in `FinOps Solution Overview.md`) and now has its own dedicated architecture in `Solution_Architecture_Bill_Verification.md` — folding it fully into this document would have stretched its title and scope past what's designed here.
+> **Scope.** This document covers requirements, architecture, and ADRs for (a), (b), and (c): anomaly detection, rightsizing, and RI/savings-plan planning. Bill verification (d) shares the scored, rule-routed pattern (see the callout above and ADR-M4 in `FinOps Solution Overview.md`) and is designed in `Solution_Architecture_Bill_Verification.md`.
 
 ### 1.2 Functional requirements (inferred)
 
-- FR1: Detect cost anomalies within a bounded window of occurrence (inferred target: within 24h, matching typical billing data freshness), scoped correctly per vertical/account.
-- FR2: Generate rightsizing recommendations with a clear, explainable rationale (current utilization vs. provisioned capacity).
-- FR3: Model outputs must be consumable by Cloud Workbench (`Solution_Architecture_Cloud_Workbench.md` §4.1, Phase 5) so users can ask about and act on findings conversationally, and — before Cloud Workbench ships — via Self-Serve Foundations' REST API (§4.1) for programmatic consumers.
-- FR4: Support model retraining without service interruption to the detection/recommendation pipeline.
-- FR5: Evaluate RI/savings-plan recommendations against a specific target — cost-savings accuracy against realized outcomes over time, not just projected savings at recommendation time (see §2.2's model selection for RI/SP modeling, which otherwise had no functional requirement of its own).
+- FR1: Detect cost anomalies within a bounded time of occurrence (inferred target: within 24h, matching billing data freshness), scoped correctly to each vertical and account.
+- FR2: Generate rightsizing recommendations with a clear, explainable rationale (utilization compared with provisioned capacity).
+- FR3: Make outputs available to Cloud Workbench (`Solution_Architecture_Cloud_Workbench.md` §4.1, Phase 5), so users can ask about findings and act on them conversationally, and, before Cloud Workbench ships, through Self-Serve Foundations' REST API (§4.1).
+- FR4: Support retraining without interrupting detection or recommendations.
+- FR5: Evaluate RI/savings-plan recommendations by realized savings over time, not only projected savings at recommendation time (§2.3).
 
 ### 1.3 Non-functional requirements (inferred)
 
 | Requirement | Target (inferred) | Rationale |
 |---|---|---|
-| False positive rate (anomaly detection) | Low enough to sustain user trust; specific threshold tuned against business tolerance, not a fixed industry number | Alert fatigue destroys adoption faster than missed anomalies |
-| Model explainability | Every flagged anomaly/recommendation must show its contributing factors | Governance requirement; also a trust/adoption requirement |
+| False positive rate (anomaly detection) | Low enough to keep user trust; the threshold is tuned to business tolerance, not an industry number | Alert fatigue kills adoption faster than missed anomalies |
+| Model explainability | Every anomaly and recommendation shows its contributing factors | Required for governance, trust, and adoption |
 | Retraining cadence | Event-triggered (drift detected) and scheduled (e.g., monthly) | Usage patterns shift with business seasonality and cloud pricing changes |
 | Auditability | Every prediction logged with model version, inputs, and output | Same HITRUST/SOC2-equivalent posture as the rest of the platform |
 
@@ -42,177 +42,251 @@ flowchart LR
     FS[Feature store] --> TR[Model training]
     TR --> REG[Model registry]
     REG --> EVAL[Eval gate]
-    EVAL --> DEPLOY[Deploy and serve]
+    EVAL --> DEPLOY["Batch scoring in Snowflake<br/>scheduled, results to gold"]
     DEPLOY --> MON[Drift monitoring]
     MON -->|drift detected| TR
-    MON --> OUT[Anomalies and recommendations<br/>written to graph]
+    MON --> OUT[Anomalies and recommendations<br/>written to gold]
 ```
 
 ### 2.1 Technology stack
 
-The JD names a specific set of hyperscaler ML platforms and MLOps tools the organization evaluates (Azure ML, SageMaker, Vertex AI, MLflow). The choices below pick among them, subject to one constraint: no Databricks anywhere in this solution (see ADR-004).
+The job description names the ML platforms and MLOps tools the organization evaluates (Azure ML, SageMaker, Vertex AI, MLflow). The choices below follow from Snowflake being the organization's data platform standard (Data Foundations ADR-003; see ADR-004).
 
 | Component | Choice | Rationale |
 |---|---|---|
-| Training/experimentation compute | Snowpark ML | Co-located with the gold-layer tables (Data Foundations §4.3) — no cross-cloud data egress, no separate ML platform to operate. See ADR-004. |
-| Feature store | Snowflake Feature Store (Snowpark ML) | Reuses Snowflake's existing RBAC/lineage rather than standing up a parallel governed store. |
-| Experiment tracking & model registry | Snowflake Model Registry (Snowpark ML) | Same versioning concepts MLflow popularized (and the JD names) — implemented natively in Snowflake rather than via a self-hosted MLflow tracking server on a separate compute platform. |
-| Hyperparameter tuning | Bayesian search (Optuna or Hyperopt), run as Snowpark jobs | Named generically in §2.3 below; either is a standard choice, not a distinguishing decision on its own. |
-| Model serving | Docker containers on AKS | Same runtime as the rest of the platform (see §2.5), rather than a hyperscaler-managed endpoint (SageMaker/Vertex endpoints) that would sit outside that shared operational surface. |
-| Drift detection | Evidently AI (or equivalent open-source drift-testing library), run as a scheduled Snowpark job | Statistical drift reports integrate with the model registry's run history and write results back to Snowflake, avoiding a bespoke monitoring service. |
+| Training/experimentation compute | Snowpark ML | Runs next to the gold-layer tables (Data Foundations §4.3), with no data egress and no separate ML platform to operate. See ADR-004 |
+| Feature store | Snowflake Feature Store (Snowpark ML) | Uses Snowflake's existing access control and lineage |
+| Experiment tracking & model registry | Snowflake Model Registry (Snowpark ML) | The versioning model MLflow popularized (and the job description names), built into Snowflake, so there is no MLflow tracking server to run |
+| Hyperparameter tuning | Bayesian search (Optuna or Hyperopt), run as Snowpark jobs | Either is a standard choice |
+| Model inference | Batch inference inside Snowflake: Model Registry warehouse inference, or Snowpark stored procedures for rules and the RI/SP optimizer, scheduled by Snowflake Tasks (Data Foundations ADR-005) | Every workload here is batch. Billing data arrives about 24 hours late, and scoring runs daily or less often, so nothing needs a low-latency endpoint. Scoring next to gold avoids moving data, keeps Snowflake's row access and masking policies in force, and leaves no cluster to run. See §2.5 and ADR-008 |
+| Container fallback | Snowpark Container Services, only if needed | For a future model that needs GPUs or packages the warehouse runtime can't provide. It stays inside Snowflake's governance boundary, so it is preferred over an external container platform for model compute. See ADR-008 |
+| Drift detection | Evidently AI (or an equivalent open-source library), run as a scheduled Snowpark job | Drift reports are written back to Snowflake alongside the registry's run history, with no separate monitoring service |
 
 ### 2.2 Feature engineering
 
-Features are computed from Snowflake's gold-layer tables (the Data Foundations doc's Section 4.3), not from raw (bronze) or silver-layer (mediation) data, ensuring the ML layer consumes the same governed, conformed data as every other consumer. Feature categories: time-series spend patterns (rolling averages, seasonality), utilization ratios (allocated vs. consumed compute/memory/storage), tagging/account context (vertical, environment, resource type), and historical anomaly/recommendation outcomes (did a past flagged item get acted on, was it a true or false positive), feeding back into future model quality.
+Features are computed from Snowflake's gold-layer tables (Data Foundations §4.3), never from bronze or silver, so the ML layer uses the same governed, conformed data as every other consumer. Feature categories: time-series spend patterns (rolling averages, seasonality), utilization ratios (allocated vs. consumed compute, memory, storage), tag and account context (vertical, environment, resource type), and past outcomes (whether a flagged item was acted on, and whether it was a true or false positive).
 
-**Not every feature is computed the same way.** Where a feature corresponds to — or is a direct input to — a defined semantic-layer metric (e.g., a rolling-spend feature built on `metric_monthly_burn_rate`, or a utilization-ratio feature that's just `metric_utilization_rate` at a finer grain), the feature pipeline reads that metric from its Semantic View rather than re-aggregating gold independently. This is the same discipline just applied to the knowledge graph (Data Foundations ADR-004) and to BI (Data Foundations ADR-002), extended to feature engineering: a feature that duplicates a named metric's calculation is a second, driftable copy of it, regardless of which layer computes the duplicate. Features with no semantic-layer equivalent — lagged values, seasonality decomposition, z-scores, and other genuinely ML-specific transformations — have no governed definition to reuse, so they compute directly from gold, same as before. See §2.2's illustrative feature table below for which is which.
+**Features that match a semantic-layer metric read the metric.** If a feature is, or directly uses, a defined metric (for example, a rolling-spend feature built on `metric_monthly_burn_rate`, or a utilization feature that is `metric_utilization_rate` at a finer grain), the feature pipeline reads it from the Semantic View instead of re-aggregating gold. This is the same rule Data Foundations applies to BI (ADR-002) and the knowledge graph (ADR-004): a second calculation of a named metric can drift from the first. Features with no semantic-layer equivalent (lags, seasonal decomposition, z-scores, and other ML-specific transforms) compute directly from gold. The table below shows which is which.
 
-A **feature store** (Snowflake Feature Store, §2.1) sits between the gold tables and model training/serving, ensuring the same feature definitions and values are used consistently in training and in production inference, avoiding train/serve skew.
+A **feature store** (Snowflake Feature Store, §2.1) sits between gold and model training and scoring, so training and production use the same feature definitions and values.
 
-**Illustrative feature constructs, by model family** — a starting set, not exhaustive; new features are expected as each model matures:
+**Illustrative features by model family.** A starting set, expected to grow:
 
 | Feature | Captures | Source | Used by |
 |---|---|---|---|
-| `spend_7d_rolling_avg`, `spend_7d_rolling_std` | Recent spend baseline and volatility per resource/account | Gold (ML-specific transform, no semantic-layer equivalent) | Anomaly detection |
-| `spend_zscore_vs_28d_baseline` | How many standard deviations current spend sits from its rolling baseline | Gold (ML-specific transform) | Anomaly detection |
-| `resource_count_delta` | New/terminated resources in the period — distinguishes a volume-driven spend change from a price-driven one | Gold (ML-specific transform) | Anomaly detection |
-| `day_of_week_seasonality_index` | Weekday/weekend usage pattern, so a Monday spike isn't flagged as anomalous every week | Gold (ML-specific transform) | Anomaly detection |
-| `utilization_rate` (allocated vs. consumed, CPU/memory/storage) | Whether a resource is over-provisioned | **Reused from `metric_utilization_rate`** (Data Foundations §4.4) — not recomputed | Rightsizing |
-| `peak_to_average_ratio` | Bursty vs. steady workload signature, distinguishes "needs headroom" from "genuinely idle" | Gold (ML-specific transform) | Rightsizing |
-| `instance_family_generation_lag` | Whether a resource is on an older generation with a newer, cheaper equivalent available | Gold (ML-specific transform, joined against a provider SKU reference) | Rightsizing |
-| `workload_type_category` | Categorical workload signature (database, batch, web) driving which per-workload-type model applies (ADR-003) | Gold, tag/account context | Rightsizing |
-| `existing_ri_sp_utilization` | Whether already-purchased commitments are being used | **Reused from `metric_ri_sp_utilization`** (Data Foundations §4.4) — not recomputed | RI/SP modeling |
-| `usage_trailing_90d_mean_and_variance` | Usage stability — a steady workload is a better commitment candidate than a volatile one | Gold (ML-specific transform) | RI/SP modeling |
-| `commitment_term_horizon_fit` | Whether observed usage trend justifies a 1-year vs. 3-year commitment | Gold (ML-specific transform) | RI/SP modeling |
-| `apm_resolution_confidence` | Whether a resource's identity was resolved via authoritative APM ID or fuzzy tag match (Data Foundations §4.4) — lower-confidence resolution should temper a recommendation's own confidence | Gold (`resolve_resource_identity()` output, Build Specification §4) | All three |
-| `historical_recommendation_outcome` | Was a past recommendation of this type accepted, rejected, or reversed for this resource/workload type | Gold (`fact_recommendation` history) | All three (feedback loop) |
-| `managed_by_iac`, `iac_config_drift_flag` | Whether the resource is declared in Terraform, and whether its live config still matches what Terraform last applied (Data Foundations §4.1) | Gold (Terraform state reference table, Build Specification §4) | Rightsizing (context, not a model input to optimize against — see below) |
+| `spend_7d_rolling_avg`, `spend_7d_rolling_std` | Recent spend baseline and volatility per resource and account | Gold (ML-specific transform, no semantic-layer equivalent) | Anomaly detection |
+| `spend_zscore_vs_28d_baseline` | How many standard deviations current spend is from its rolling baseline | Gold (ML-specific transform) | Anomaly detection |
+| `resource_count_delta` | New or terminated resources in the period, to tell a volume-driven change from a price-driven one | Gold (ML-specific transform) | Anomaly detection |
+| `day_of_week_seasonality_index` | Weekday and weekend patterns, so a normal Monday spike isn't flagged every week | Gold (ML-specific transform) | Anomaly detection |
+| `utilization_rate` (allocated vs. consumed, CPU/memory/storage) | Whether a resource is over-provisioned | **Reused from `metric_utilization_rate`** (Data Foundations §4.4), not recomputed | Rightsizing |
+| `peak_to_average_ratio` | Bursty vs. steady workload, to tell "needs headroom" from "idle" | Gold (ML-specific transform) | Rightsizing |
+| `instance_family_generation_lag` | Whether a resource is on an older generation with a newer, cheaper equivalent | Gold (ML-specific transform, joined to a provider SKU reference) | Rightsizing |
+| `workload_type_category` | Workload type (database, batch, web), which selects the headroom policy (ADR-003) | Gold, tag and account context | Rightsizing |
+| `cpu_p95_utilization`, `memory_p99_utilization` | Peak utilization over the lookback window (default 30 days). Memory uses a higher percentile because running out of memory breaks a workload, while CPU saturation only slows it | Gold (ML-specific transform over utilization telemetry) | Rightsizing |
+| `existing_ri_sp_utilization` | Whether commitments already bought are being used | **Reused from `metric_ri_sp_utilization`** (Data Foundations §4.4), not recomputed | RI/SP modeling |
+| `usage_trailing_90d_mean_and_variance` | Usage stability; a steady workload is a better commitment candidate than a volatile one | Gold (ML-specific transform) | RI/SP modeling |
+| `commitment_term_horizon_fit` | Whether the usage trend supports a 1-year or 3-year commitment | Gold (ML-specific transform) | RI/SP modeling |
+| `existing_commitment_expiry_schedule` | Hourly committed capacity already owned, by commitment scope, for each future hour until each commitment expires | Gold (`gold.dim_commitment`, Build Specification §3) | RI/SP modeling (optimizer input, not a model feature) |
+| `apm_resolution_confidence` | Whether a resource was matched to its application by APM ID or by fuzzy tag match (Data Foundations §4.4). A weaker match should lower the recommendation's confidence | Gold (`resolve_resource_identity()` output, Build Specification §4) | All three |
+| `historical_recommendation_outcome` | Whether a past recommendation of this type was accepted, rejected, or reversed for this resource or workload type | Gold (`fact_recommendation` history) | All three (feedback loop) |
+| `managed_by_iac`, `iac_config_drift_flag` | Whether Terraform declares the resource, and whether its live config still matches what Terraform last applied (Data Foundations §4.1) | Gold (Terraform state table, Build Specification §4) | Rightsizing (context, not something to optimize; see below) |
 
-**IaC context changes what a rightsizing recommendation means, not just what it computes.** `managed_by_iac` and `iac_config_drift_flag` are deliberately listed as *context* rather than an ordinary model input: a low-utilization resource that exactly matches its Terraform-declared size is a different situation from one that's drifted from it. The model's own utilization-based signal doesn't change either way, but the recommendation surfaced downstream does — see ADR-005.
+**Terraform context changes what a rightsizing recommendation means.** `managed_by_iac` and `iac_config_drift_flag` are context, not ordinary inputs. A low-utilization resource that exactly matches its Terraform-declared size is a different case from one that has drifted. The utilization signal is the same either way; the recommendation shown to people differs (ADR-005).
 
 ### 2.3 Model selection and training
 
-- **Anomaly detection**: statistical/ML approaches appropriate to time-series spend data (e.g., seasonal decomposition plus threshold-based or isolation-forest-style detection), chosen for explainability over black-box deep learning approaches, given the governance requirement that every flag show its contributing factors (see ADR-002).
-- **Rightsizing recommendations**: regression/classification models predicting appropriate resource sizing from utilization history, trained per resource type/workload pattern rather than one undifferentiated model, since a database workload and a batch job have very different utilization signatures.
-- **RI/savings-plan modeling**: forecasting models projecting future usage against commitment options, evaluated on cost-savings accuracy against realized outcomes over time.
+- **Anomaly detection**: statistical and ML methods suited to time-series spend (for example, seasonal decomposition with threshold-based or isolation-forest detection), chosen for explainability over deep learning, because every flag must show its contributing factors (ADR-002).
+- **Rightsizing recommendations**: deterministic sizing rules, not a supervised model. No label exists for "the correct size" of a resource, so there is nothing to train a regression or classifier on. A recommendation is computed in four steps:
+  1. **Measure peak demand.** Take `cpu_p95_utilization` and `memory_p99_utilization` over the lookback window (default 30 days, long enough to include a month-end cycle).
+  2. **Apply a headroom policy.** The target is the smallest size where projected peak utilization stays under the workload's ceiling, set by `workload_type_category` (illustrative defaults: web/stateless CPU p95 at or below 70%, database memory p99 at or below 80%, batch CPU p95 at or below 85%). Ceilings are configuration owned by the FinOps/platform team with cloud engineering, not learned values.
+  3. **Pick a compatible SKU.** From the provider SKU catalog, choose the cheapest SKU that meets the target and keeps the resource's hard constraints: CPU architecture, local storage, network performance, and any licensing tied to core count. Prefer a newer generation where `instance_family_generation_lag` shows one exists.
+  4. **Price and explain.** Estimated savings are the price difference at the resource's current pricing (on-demand or covered by a commitment). Contributing factors are the measured percentiles, the ceiling applied, and the SKU chosen.
+
+  Where the provider has its own recommendation for the same resource (AWS Compute Optimizer through Cost Optimization Hub, Azure Advisor, GCP machine type recommender), it is attached as context. Agreement raises confidence. Disagreement is shown to the reviewer with both reasons, since the provider may see metrics the platform doesn't collect (for example, memory on AWS where the CloudWatch agent is installed), and the platform sees context the provider doesn't (headroom policy, Terraform management, APM ownership).
+
+  Resources with fewer than 14 days of telemetry, or whose `peak_to_average_ratio` shows peaks too short for percentiles to capture, are skipped. ML is used only where rules can't do the job: classifying `workload_type_category` when tags don't declare it. Quality is measured after the fact: realized savings, and the **regret rate** (the share of applied recommendations that were reversed, or followed by CPU throttling or out-of-memory events, within 30 days).
+- **RI/savings-plan modeling**: an optimization problem, solved in two steps, because a forecast alone doesn't say what to buy.
+  1. **Forecast.** A probabilistic forecast of hourly commitment-eligible usage per commitment scope (for example, AWS Compute Savings Plan normalized spend, an Azure reservation's VM family and region, or a GCP committed-use resource type) over the candidate terms. It produces quantiles (P10, P50, P90), because the purchase decision depends on how low usage could plausibly go.
+  2. **Optimize.** Choose purchase quantities per commitment type and term (1-year or 3-year, and payment option where offered) to maximize expected net savings over on-demand, subject to:
+     1. Committed capacity, including existing commitments still in force (`existing_commitment_expiry_schedule`), stays at or below a low forecast quantile (default P20), so utilization of what's owned stays at or above a target (default 95%).
+     2. Purchases are split into tranches across the year so expiries stay staggered, matching the laddering the team already does (`FinOps Current State.md`).
+     3. Upfront payment stays within any cash limit Finance sets.
+
+     This is a small linear program per commitment scope, solved in Snowpark with an open-source solver (such as OR-Tools or PuLP). The output is a dated purchase plan with expected savings, expected utilization, and the downside if usage falls to P10.
+
+  Plans are evaluated by backtest, not only by forecast accuracy: each past plan is replayed against the usage that followed, and its realized savings, utilization, and coverage are compared with the purchases the team actually made (FR5).
 
 ### 2.4 MLOps lifecycle (Snowflake Model Registry-based)
 
-- **Versioning**: every model version, its training data snapshot, feature set version, and hyperparameters logged in the Snowflake Model Registry.
-- **CI/CD integration**: a model change (retrain, new feature, hyperparameter update) runs through an **eval gate** before promotion, performance against a held-out validation set must meet or exceed the currently deployed model before replacing it.
-- **Drift monitoring**: both **data drift** (are incoming usage patterns diverging from training data) and **model drift** (is prediction quality degrading over time) tracked continuously; either crossing a threshold triggers a retraining cycle. Tooling for this is detailed in §2.6 below.
-- **A/B testing**: a new model version is shadow-tested against a sample of real traffic, compared against the current production model's outputs, before full rollout.
-- **Retraining triggers**: scheduled (monthly baseline) and event-triggered (drift threshold crossed, or a step-change in cloud provider pricing/services that likely invalidates prior patterns).
+- **Versioning**: every model version, its training data snapshot, feature set version, and hyperparameters are logged in the Snowflake Model Registry.
+- **CI/CD integration**: any model or rule change (retrain, new feature, hyperparameter update, headroom ceiling change) goes through an **eval gate** before promotion and must meet or beat the current version. None of these models starts with labeled data, so each gate uses what can actually be measured:
+
+  | Model | Labels at launch | Eval gate |
+  |---|---|---|
+  | Anomaly detection | None | 0. **Provider baseline**: on AWS, match or beat Cost Anomaly Detection (`gold.fact_provider_anomaly`) on recall of injected anomalies at the same or lower alert volume (ADR-007). 1. **Recall on injected anomalies**: synthetic spikes, step changes, and slow ramps of known size added to a held-back slice of real spend history. 2. **Alert volume**: flags per vertical per week stay within a budget the FinOps team sets, since alert fatigue is the main adoption risk (§1.3). 3. **Precision against dispositions**, added once enough exist (default: 300 dispositioned anomalies): the share of flags the FinOps team marked `true_anomaly` or `expected_change` instead of `false_positive` |
+  | Rightsizing | None, and none needed (rules, ADR-003) | 0. **Provider baseline**: every disagreement with the provider's recommendation for the same resource (`gold.fact_provider_recommendation`) is reported, and regret rates are compared where the two differ (ADR-007). 1. **Snapshot regression test**: a fixed input snapshot must produce the same recommendations unless the change is a reviewed rule change. 2. **Regret rate** and realized savings for recommendations applied in the previous period (§2.3) |
+  | RI/SP planning | Not applicable (optimization) | **Backtest**: realized savings and utilization of the candidate's past plans against actual usage, compared with the current version, the purchases the team actually made, and the provider's purchase recommendations for the same period (§2.3, ADR-006, ADR-007) |
+  | Bill verification | None | Rules first, model only once labels exist (Bill Verification §3.3) |
+
+- **Label capture**: every anomaly shown to the FinOps team gets a disposition (`true_anomaly`, `expected_change`, `false_positive`), recorded through the Self-Serve API (Build Specification §7) during the team's existing anomaly review. Dispositions feed the precision gate above and `historical_recommendation_outcome` (§2.2). During the A/B period (Solution Overview, migration steps 16-18), flags where the new detector and today's stored-procedure logic disagree are dispositioned first, building the first labels from work the team already does.
+- **Drift monitoring**: both **data drift** (incoming usage patterns moving away from training data) and **model drift** (prediction quality declining) are tracked continuously. Either crossing a threshold triggers retraining. Tooling is in §2.6.
+- **A/B testing**: a new model version runs in shadow against real data and is compared with the current production version before full rollout.
+- **Retraining triggers**: scheduled (monthly) and event-driven (a drift threshold crossed, or a change in provider pricing or services that likely invalidates past patterns).
 
 ### 2.5 Serving and integration
 
-Models are served via a versioned internal API (consistent with the Self-Serve Foundations doc's API/service layer), containerized (Docker) and deployed on the same **AKS** infrastructure as the rest of the platform, with resource governance limits appropriate to the batch/near-real-time nature of scoring workloads (distinct from the more latency-sensitive Cloud Workbench query path). Model outputs (anomalies, recommendations) are written back to Snowflake's gold layer as facts, where Cloud Workbench's retrieval layer can surface and explain them conversationally.
+**All model compute runs as batch jobs inside Snowflake, not as long-running container services** (ADR-008). The reason is the shape of the work:
+
+1. **Nothing here needs online serving.** Provider billing data lands about 24 hours late (Data Foundations §2.3), so anomaly scoring, rightsizing, RI/SP planning, and bill verification run on a schedule, daily or less often. A low-latency endpoint would sit idle almost all the time.
+2. **The data stays put.** Scoring reads the Feature Store and gold tables where they live, instead of copying them to a cluster. Row access policies, masking, and lineage (Data Foundations §4.3) stay in force, and there is no second copy of cost data to secure.
+3. **Nothing extra to operate.** No scoring service to patch, scale, or put on call. Warehouses suspend when idle and bill per second.
+4. **Same feature definitions for training and scoring.** Both read the same Feature Store on the same platform, which removes a common cause of train/serve skew.
+
+How each workload runs:
+
+| Workload | Runs as | Schedule |
+|---|---|---|
+| Anomaly detection | Model Registry warehouse inference over the day's features | Daily, after `job_gold_aggregate_cost` |
+| Rightsizing | Snowpark stored procedure applying the sizing rules (ADR-003) | Daily |
+| RI/SP planning | Snowpark stored procedure: forecast, then linear program (ADR-006) | Weekly, and on demand before a purchase decision |
+| Bill verification | Snowpark stored procedure (rules) or Model Registry inference (once a model is promoted) | On new invoice lines or a restated billing period (Build Specification §10) |
+| What-if projections | The same procedures, called on demand from the pull workbench (Streamlit-in-Snowflake, Cloud Workbench Expansion ADR-3) | Interactive; a few seconds is acceptable |
+
+Each workload has its own warehouse, so its credit use shows up separately, in line with tracking the platform's own cost (Solution Overview NFRs). Outputs (anomalies, recommendations, verification results) are written to Snowflake's gold layer as facts. The Self-Serve API (Self-Serve Foundations §4.1) and Cloud Workbench read those facts; neither calls a model directly.
+
+CMP, the organization's container platform, hosts the platform's long-running services, where an always-on process with a latency target is the actual requirement: `cost-intelligence-api` (REST API, MCP tools, and the Cloud Workbench agent) and the Temporal workers with their OPA sidecar (Build Specification §8).
 
 ### 2.6 Observability, monitoring, and alerting
 
-Distinct from §2.4's drift-monitoring *triggers* (the "when to retrain" logic), this is the tooling that makes model health visible day to day:
+§2.4's drift monitoring decides when to retrain. This section is the tooling that makes model health visible day to day:
 
-- **Infrastructure metrics**: Datadog Infrastructure Monitoring on the AKS-hosted scoring services (latency, throughput, error rate) — the same pattern used for any other AKS workload on the platform (Data Foundations §4.5), not a bespoke ML monitoring stack.
-- **Model-quality metrics**: scheduled Evidently AI drift/quality reports (§2.1) written back to a `gold.model_quality_metrics`-style table, following the same "write facts back to Snowflake" pattern §2.5 already uses for predictions — queryable by Cloud Workbench and reportable through the same BI path as everything else (Data Foundations ADR-003).
-- **Alerting**: Datadog Monitors for infrastructure thresholds; model-quality alerts (drift crossing a threshold, false-positive rate climbing) route through the same Datadog Monitors, posting to a Teams channel and opening a ticket/paging via ITSM (believed to be ServiceNow, not confirmed, per `FinOps Opportunities.md` §2b) — the same two channels every phase's alerting routes through (Data Foundations §4.5), rather than a second, ML-specific alerting system.
-- **Tracing**: OpenTelemetry spans across the feature-computation-to-scoring pipeline, exported to Datadog APM — consistent with the per-stage tracing Cloud Workbench (§4.2) and Data Foundations (§4.5) use for their own stages — one tracing backbone for the platform, not two.
-- **Review cadence**: real-time infra metrics reviewed by on-call as part of normal ops; data-quality checks daily; model performance weekly; fairness/drift and the §3.2 subgroup review monthly; a full strategic review of the model portfolio quarterly. Cadence, not a fixed SLA, because none of this is a customer-facing uptime commitment.
+- **Job metrics**: scoring job success or failure, duration, and rows scored from Snowflake task and query history, plus per-warehouse credit use, sent to Datadog through its Snowflake integration. This is the same Datadog backend every phase uses (Data Foundations §4.5). There is no scoring service, so there are no latency or throughput metrics.
+- **Model-quality metrics**: scheduled Evidently AI drift and quality reports (§2.1), written to a `gold.model_quality_metrics`-style table, so Cloud Workbench and BI can query them like other facts (Data Foundations ADR-003).
+- **Alerting**: Datadog Monitors for job and infrastructure thresholds. Model-quality alerts (drift past a threshold, a rising false-positive rate) use the same monitors, posting to a Teams channel and opening a ticket or page in ITSM (believed to be ServiceNow, not confirmed). These are the same two channels every phase uses (Data Foundations §4.5).
+- **Tracing**: job-level OpenTelemetry spans for the pipeline from feature computation to scoring, emitted by the scheduled jobs and exported to Datadog APM, with Snowpark procedure logs captured in a Snowflake event table. This is the same tracing backbone as Cloud Workbench (§4.2) and Data Foundations (§4.5).
+- **Review cadence**: scoring job failures handled by on-call; data-quality checks daily; model performance weekly; drift and the §3.2 subgroup review monthly; a strategic review of all models quarterly. These are review rhythms, not SLAs, because none of this is a customer-facing uptime commitment.
 
 ### 2.7 Explainability and governance
 
-Every model prediction is logged with its contributing factors (feature values and their relative weight in the decision), model version, and timestamp, satisfying both the audit requirement and the trust/adoption requirement, a rightsizing recommendation a user can't understand or verify is one they won't act on. Bias evaluation, in this domain, means checking the model doesn't systematically under- or over-flag certain verticals/account types due to data volume imbalances rather than genuine risk differences. Broader AI governance practice (impact screening, human oversight mapping, standards alignment) is treated as its own section below (§3), rather than folded into this one.
+Every prediction is logged with its contributing factors (feature values and their weight in the result), model version, and timestamp. That serves both audit and adoption: nobody acts on a rightsizing recommendation they can't understand or check. Bias evaluation here means checking that a model doesn't over- or under-flag certain verticals or account types because of differences in data volume rather than real risk. Broader AI governance (impact screening, human oversight, standards alignment) is covered in §3.
 
 ---
 
 ## 3. AI Governance
 
-The data these models train and score on is cloud cost, usage, and utilization data at the resource/account/vertical level — it is not about individual people, and none of it feeds a consequential decision about a person (hiring, credit, benefits, and similar). That materially lowers the stakes relative to, say, an HR or lending model, and nothing below should be read as asserting a legal requirement applies here (none of the AI-specific laws or GDPR-style automated-decision provisions are triggered by this use case, on current understanding). The practices are adopted anyway, as governance discipline consistent with what the JD itself asks for — "model explainability, bias evaluation, prediction logging" and documentation that keeps the system "transparent and responsible" — and because a future use case built on this same pipeline might not be so low-stakes.
+These models train and score on cloud cost, usage, and utilization data at the resource, account, and vertical level. None of it is about individual people, and none of it feeds a consequential decision about a person (hiring, credit, benefits, and similar). That lowers the stakes compared with, say, an HR or lending model, and nothing below claims a legal requirement applies (on current understanding, no AI-specific law or GDPR-style automated-decision rule is triggered). The practices are adopted anyway, because the job description asks for "model explainability, bias evaluation, prediction logging" and documentation that keeps systems "transparent and responsible," and because a future use of this pipeline might carry higher stakes.
 
 ### 3.1 Data protection impact screening
 
-Screening question: does the model process personal data, or drive an automated decision with legal or similarly significant effect on an individual? Answer, on current understanding: no. Model inputs are resource/account/vertical-level aggregates (§2.2); the one place personal data plausibly touches this system is the Owner/Technical Contact fields on the APPLICATION/APM entity (Data Foundations §4.3's gold model), and those are routing/notification metadata, never a model feature.
+Screening question: does the model process personal data, or make an automated decision with legal or similarly significant effect on a person? Answer, on current understanding: no. Model inputs are resource, account, and vertical aggregates (§2.2). The one place personal data plausibly appears is the Owner and Technical Contact fields on the APPLICATION entity (Data Foundations §4.3), which are used for routing and notification, never as model features.
 
-**Assumption adopted**: a full DPIA is not triggered under this design. That conclusion is recorded here as a screening decision, not left implicit — if the Owner/Technical Contact field, or any other personal-data field, is ever promoted from metadata to an actual model feature, this screening must be redone.
+**Assumption adopted**: a full DPIA isn't triggered by this design. This is recorded as an explicit screening decision. If an Owner, Technical Contact, or any other personal field ever becomes a model feature, the screening must be redone.
 
 ### 3.2 Ethical / algorithmic impact assessment
 
-The "affected parties" for fairness purposes here are business verticals and application teams, not demographic groups — organizational fairness rather than individual fairness. §2.7 already names the concern (don't let data-volume imbalance masquerade as genuine risk difference); this subsection makes it a repeatable check rather than a stated intention: per-vertical subgroup performance is reviewed at every retraining cycle (§2.6's monthly cadence), with a documented outcome either way — a clean pass, or a flagged imbalance with an owner and a mitigation plan, never a silent "probably fine."
+The affected parties for fairness purposes are business verticals and application teams, not demographic groups, so this is organizational fairness. §2.7 names the concern (data-volume differences showing up as apparent risk differences); this section makes it a repeatable check. Per-vertical performance is reviewed at every retraining cycle (§2.6, monthly) with a documented result: either a clean pass, or a flagged imbalance with an owner and a mitigation plan.
 
-Second-order effect worth naming: a false-positive rate that's too high erodes trust and recommendation fatigue faster than it erodes any single metric (the NFR table's false-positive-rate row exists for this reason). The separate risk of *over-automating* on a finding is explicitly not this document's concern — Governed Automation's risk-tiered approval owns that boundary; this document only vouches for the finding's quality, not what happens to it next.
+A second-order effect: a false-positive rate that is too high erodes trust faster than it shows up in any metric, which is why the NFR table has a false-positive row. The risk of *over-automating* on a finding belongs to Governed Automation's risk tiers, not this document. This document is responsible for the quality of a finding, not for what happens to it next.
 
 ### 3.3 Human oversight model
 
-Every output of this pipeline is a proposal, never a decision. A finding surfaces to Core Intelligence/Cloud Workbench as a recommendation (human-on-the-loop: humans monitor and can act, but aren't required to review each one before it's visible); if a finding becomes a candidate for automated action, it passes into Governed Automation's LOW/MEDIUM/HIGH routing (§2.2 there), where HIGH is a hard human-in-the-loop gate with no exception. This document's models are never the last decision-maker in that chain.
+Every output of this pipeline is a proposal, never a decision. A finding appears in Core Intelligence's outputs and Cloud Workbench as a recommendation (human-on-the-loop: people monitor and can act, but don't review each one before it is visible). If a finding becomes a candidate for automated action, it goes through Governed Automation's LOW/MEDIUM/HIGH routing (§2.2 there), where HIGH always requires human approval. These models are never the last decision-maker.
 
 ### 3.4 Model documentation & audit artifacts
 
-- **Model card** per deployed model version: intended use, per-vertical subgroup performance (§3.2), the training data snapshot it was built from (versioned in the Snowflake Model Registry, §2.1), and known limitations. Regenerated at every promotion through the eval gate (§2.4) — a living artifact, not a one-time writeup.
-- **Decision log**: this document's own Architecture Decision Records (§4) already serve this purpose — alternatives considered and why they were rejected, timestamped by document revision. No separate decision log is maintained.
+- **Model card** per deployed version: intended use, per-vertical performance (§3.2), the training data snapshot (versioned in the Snowflake Model Registry, §2.1), and known limitations. Regenerated at every promotion through the eval gate (§2.4).
+- **Decision log**: this document's Architecture Decision Records (§4) record the alternatives considered and why they were rejected. No separate decision log is kept.
 
 ### 3.5 Standards alignment
 
-No AI-specific law is understood to apply (§3.1's screening is why), so nothing here is framed as a compliance obligation. The structure above is deliberately shaped to align with two widely used voluntary frameworks, chosen because they're the closest match to the JD's own governance language: the **NIST AI Risk Management Framework**'s Govern/Map/Measure/Manage functions as the general shape of §2.6's monitoring and §3.2's assessment cadence, and **ISO/IEC 42001**-style documentation habits (model cards, decision logs, versioned everything, §3.4) as the audit-readiness bar. Neither is asserted as a certification target here, only as a recognizable reference point for any future reviewer.
+No AI-specific law is understood to apply (§3.1), so nothing here is framed as a compliance obligation. The practices above are shaped to match two widely used voluntary frameworks that are closest to the job description's governance language: the **NIST AI Risk Management Framework** (Govern, Map, Measure, Manage) as the general shape of §2.6's monitoring and §3.2's assessments, and **ISO/IEC 42001**-style documentation (model cards, decision logs, versioning, §3.4) as the audit-readiness bar. Neither is a certification target; both are reference points for a reviewer.
 
-**Assumption flagged**: if this MLOps pipeline is ever reused for a use case that does touch individual-level decisions (an HR-adjacent or vendor-risk-scoring model, for instance), none of this section's conclusions carry over automatically — that use case needs its own DPIA/impact-assessment screening from scratch, not an inherited "already covered" assumption.
+**Assumption flagged**: if this pipeline is reused for a use case that touches decisions about individuals (an HR-adjacent or vendor-risk scoring model, for example), none of these conclusions carry over. That use case needs its own DPIA and impact screening.
 
 ---
 
 ## 4. Architecture Decision Records
 
-**ADR-001: Compute features from gold-layer data only, never from silver (mediation) or raw (bronze) source data — and reuse semantic-layer metrics where a feature overlaps one**
-- *Context*: Multiple layers of the platform touch this data at different levels of conformance. Separately, some feature categories (§2.2's "time-series spend patterns," "utilization ratios") overlap conceptually with metrics already defined in the semantic layer (`metric_monthly_burn_rate`, `metric_utilization_rate`).
-- *Decision*: The ML layer consumes only governed, gold-layer data, same as every other downstream consumer. Where a feature corresponds to a named semantic-layer metric, the feature pipeline reads that metric rather than re-aggregating gold independently; only features with no semantic-layer equivalent compute directly from gold.
-- *Alternatives considered*: Feature engineering directly from silver-layer (mediation) data for freshness, rejected, would bypass Snowflake's governance/lineage guarantees for model inputs, undermining auditability. Computing every feature independently from gold regardless of semantic-layer overlap, rejected — for the subset of features that mirror a named metric, this reintroduces the same drift risk Data Foundations ADR-002 exists to close, just inside the ML pipeline instead of BI.
-- *Consequences*: Feature freshness is bounded by the gold layer's refresh cadence, an acceptable tradeoff given cost data's inherent billing-lag freshness ceiling anyway. A feature that reuses a semantic-layer metric also inherits that metric's own change history — a redefinition of `metric_utilization_rate` silently changes a rightsizing feature's meaning too, which argues for the semantic layer's own change management (Data Foundations §4.5) treating metric changes as impacting ML consumers, not just BI/Cloud Workbench ones.
+**ADR-001: Compute features from gold only, and reuse semantic-layer metrics where a feature matches one**
+- *Context*: Several platform layers hold this data at different levels of conformance. Some feature categories (§2.2's time-series spend patterns and utilization ratios) overlap with metrics the semantic layer already defines (`metric_monthly_burn_rate`, `metric_utilization_rate`).
+- *Decision*: The ML layer reads only governed gold data, like every other consumer. A feature that matches a named metric reads that metric; only features with no semantic-layer equivalent compute directly from gold.
+- *Alternatives considered*: Engineering features from silver for freshness, rejected; it bypasses Snowflake's governance and lineage for model inputs and weakens auditability. Computing every feature from gold regardless of overlap, rejected; for features that mirror a named metric, it brings back the drift risk Data Foundations ADR-002 exists to prevent.
+- *Consequences*: Feature freshness is bounded by gold's refresh cadence, which is acceptable given billing lag. A feature that reuses a metric also inherits the metric's change history: redefining `metric_utilization_rate` changes a rightsizing feature too. The semantic layer's change management (Data Foundations §4.5) must therefore treat metric changes as affecting ML consumers, not only BI and Cloud Workbench.
 
-**ADR-002: Favor explainable models (statistical/tree-based) over black-box deep learning for anomaly detection**
-- *Context*: Every flagged anomaly must show its contributing factors, both for governance and for user trust/adoption.
-- *Decision*: Use explainable model families where they meet accuracy requirements; reserve more complex approaches only where explainability can be preserved through a separate technique (e.g., feature attribution).
-- *Alternatives considered*: A higher-capacity deep learning model for potentially better raw accuracy, rejected as the default, the explainability cost outweighs a marginal accuracy gain in a domain where user trust in the recommendation matters as much as the recommendation's precision.
-- *Consequences*: Some ceiling on raw model accuracy versus a more complex alternative, in exchange for auditable, explainable output.
+**ADR-002: Prefer explainable models (statistical or tree-based) over deep learning for anomaly detection**
+- *Context*: Every anomaly must show its contributing factors, for governance and for user trust.
+- *Decision*: Use explainable model families where they are accurate enough. Use more complex approaches only where explainability can be kept through a separate technique (for example, feature attribution).
+- *Alternatives considered*: A higher-capacity deep learning model for possibly better accuracy, rejected as the default. In a domain where trust matters as much as precision, losing explainability costs more than a small accuracy gain.
+- *Consequences*: Some ceiling on accuracy compared with a more complex model, in exchange for auditable, explainable output.
 
-**ADR-003: Separate rightsizing models per resource/workload type rather than one general model**
-- *Context*: Utilization signatures differ substantially across workload types (database vs. batch job vs. web service).
-- *Decision*: Train and version separate models per workload category.
-- *Alternatives considered*: One general model with workload type as a feature, rejected, risks the model learning workload-type-driven patterns as noise rather than the model architecture reflecting genuinely different underlying behavior.
-- *Consequences*: More models to version, monitor, and retrain, but materially better recommendation quality per workload type.
+**ADR-003: Compute rightsizing with deterministic sizing rules and per-workload headroom policies, not a supervised model**
+- *Context*: Utilization patterns differ a lot across workload types (database, batch, web service), which might suggest a separately trained model per type. But a rightsizing model needs a label (the correct size for a resource), and none exists: past sizes reflect what was provisioned, not what was right.
+- *Decision*: Compute recommendations from utilization percentiles, a headroom ceiling selected by `workload_type_category`, and the provider SKU catalog (§2.3). Workload differences are configuration (different ceilings and percentiles), not separate models. ML is limited to classifying workload type where tags don't declare it.
+- *Alternatives considered*: Per-workload regression or classification models, rejected. There is no ground truth to train on, and a model trained on current sizes would learn to reproduce today's over-provisioning. One general supervised model, rejected for the same reason.
+- *Consequences*: Recommendations are fully explainable (a percentile, a ceiling, a SKU) and reviewable by cloud engineers without ML knowledge. Quality depends on the ceilings being right, so they are tuned against the regret rate (§2.3). If applied-recommendation outcomes build up into a real label set, a learned ceiling per workload type can be reconsidered.
 
-**ADR-004: Train and register models on Snowpark ML rather than Databricks or a single hyperscaler's native ML platform**
-- *Context*: the organization's cloud estate spans AWS, Azure, and GCP, and the JD explicitly names Azure ML, SageMaker, Vertex AI, and MLflow as tooling the team evaluates. Data Foundations already consolidated storage and transformation onto Snowflake (its ADR-003) per explicit direction that Databricks is not used anywhere in this solution — so an earlier version of this ADR, which put training on Databricks ML because it was co-located with a Databricks lakehouse, no longer applies once that lakehouse doesn't exist.
-- *Decision*: Keep training, the feature store, and the model registry co-located with the gold-layer data on Snowflake — via Snowpark ML for training/feature engineering and the native Snowflake Model Registry in place of a self-hosted MLflow tracking server — rather than a hyperscaler-specific ML platform as the default training path.
-- *Alternatives considered*: Azure ML, SageMaker, or Vertex AI as the primary training platform, rejected as the default — each would require exporting gold data out of Snowflake into a single cloud's ML plane, undermining Data Foundations' "one governed copy of the data" principle. A per-cloud split (train AWS-sourced data on SageMaker, Azure-sourced on Azure ML, and so on), rejected as unnecessary complexity for data that's already unified in one platform. Self-hosted MLflow on AKS as the registry, rejected as the default — it would work, but adds an operated service for something Snowflake's native registry already covers without one, given Snowflake is already the platform of record.
-- *Consequences*: Snowpark ML's training-side tooling and ecosystem is younger and narrower than Databricks' or a hyperscaler-native ML platform's — heavier custom deep-learning work, distributed multi-GPU training, or a specific pretrained-model ecosystem some team already depends on would be a real gap here, not a hypothetical one. Accepted given MLOps Pipeline ADR-002 already scopes these specific models as explainable/statistical rather than deep learning; if that scope changes, this decision should be revisited rather than stretched to cover a workload it wasn't evaluated against.
+**ADR-004: Train and register models on Snowpark ML, not Databricks or one hyperscaler's ML platform**
+- *Context*: the organization's estate spans AWS, Azure, and GCP, and the job description names Azure ML, SageMaker, Vertex AI, and MLflow as tools the team evaluates. Data Foundations builds on Snowflake because it is the organization's data platform standard (its ADR-003), so the gold data models train on already lives there.
+- *Decision*: Keep training, the feature store, and the model registry next to the gold data in Snowflake: Snowpark ML for training and feature engineering, and the Snowflake Model Registry instead of an MLflow tracking server.
+- *Alternatives considered*: Azure ML, SageMaker, or Vertex AI as the main training platform, rejected as the default; each would export gold data out of Snowflake into one cloud's ML platform, breaking the "one governed copy of the data" principle. Training each cloud's data on that cloud's ML service, rejected; needless complexity for data already unified in one place. A self-hosted MLflow server as the registry, rejected as the default; it works but adds a service to operate for something Snowflake's registry already covers.
+- *Consequences*: Snowpark ML's training tooling is younger and narrower than Databricks' or a hyperscaler's. Heavy deep learning, distributed multi-GPU training, or dependence on a specific pretrained-model ecosystem would be a real gap. That is acceptable because ADR-002 scopes these models as explainable and statistical. If that scope changes, revisit this decision instead of stretching it.
 
-**ADR-005: Surface IaC-managed status and config drift as recommendation context, not silently ignore it**
-- *Context*: The rightsizing model only observes utilization data — it can't distinguish a resource that's over-provisioned by accident from one that's deliberately sized per an approved Terraform module, and has no way to know that resizing a Terraform-managed resource directly (rather than through its IaC pipeline) risks the change being reverted or conflicting on the next `terraform apply` (Governed Automation §3.3).
-- *Decision*: Attach `managed_by_iac` and `iac_config_drift_flag` (Data Foundations §4.1) to every rightsizing recommendation as context, and change the recommendation's own framing based on it: a low-utilization, IaC-managed, non-drifted resource surfaces as "matches its approved Terraform config — change the module, not the live resource," while a genuinely unmanaged or already-drifted resource surfaces as an ordinary rightsizing recommendation.
-- *Alternatives considered*: Ignore IaC status and let Governed Automation's execution layer be the only place this is checked, rejected — by the time a proposal reaches Governed Automation, the recommendation has already been framed to a human (or the model) as a plain resize, which is the wrong framing for an approved, intentional configuration; the context is more useful earlier, where a reviewer sees it before deciding.
-- *Consequences*: The feature store depends on a currently-fresh Terraform state sync (Data Foundations §4.1) — a stale sync could mis-frame a recommendation, so this reference table's freshness matters more than a typical dimension table would.
+**ADR-005: Show Terraform management and config drift as recommendation context**
+- *Context*: Rightsizing sees only utilization. It can't tell a resource over-provisioned by accident from one sized on purpose in an approved Terraform module, and it can't know that resizing a Terraform-managed resource directly (instead of through its IaC pipeline) may be reverted or conflict on the next `terraform apply` (Governed Automation §3.3).
+- *Decision*: Attach `managed_by_iac` and `iac_config_drift_flag` (Data Foundations §4.1) to every rightsizing recommendation, and change the wording based on them. A low-utilization, Terraform-managed, non-drifted resource is shown as "matches its approved Terraform config; change the module, not the live resource." An unmanaged or already-drifted resource is shown as an ordinary rightsizing recommendation.
+- *Alternatives considered*: Ignoring Terraform status and leaving the check to Governed Automation's execution step, rejected. By then the recommendation has already been presented to a person as a plain resize, which is the wrong framing for an approved configuration. The context is more useful before the reviewer decides.
+- *Consequences*: Recommendations depend on a fresh Terraform state sync (Data Foundations §4.1). A stale sync could frame a recommendation wrongly, so this table's freshness matters more than a typical dimension's.
+
+**ADR-006: Treat RI/SP planning as forecast-then-optimize**
+- *Context*: Commitment planning is a purchase decision under uncertainty. A point forecast of usage doesn't say how much to commit, for which term, or how to stagger purchases against commitments expiring through the year.
+- *Decision*: Produce a probabilistic usage forecast per commitment scope, then solve a small linear program that maximizes expected net savings subject to a utilization floor, staggered expiries, and any upfront-cash limit (§2.3). Evaluate by backtesting purchase plans against realized usage.
+- *Alternatives considered*: A forecast with a person choosing quantities, rejected as the default; it leaves the actual decision, and the laddering arithmetic that takes much of the team lead's time today, manual. Committing a fixed share of recent average usage, rejected; it ignores volatility and existing expiries, which is where over-commitment happens.
+- *Consequences*: Needs an inventory of owned commitments with expiry dates (`gold.dim_commitment`), which billing exports don't include. Every plan is a recommendation the FinOps team approves and executes; nothing is bought automatically, because a commitment is a multi-year financial obligation, not a reversible infrastructure change.
+
+**ADR-007: Use provider-native recommendations and anomaly detection as baselines and inputs, and build only where they fall short**
+- *Context*: Every provider runs free recommendation and anomaly services, and most can be retrieved by API or scheduled export (Data Foundations §4.1). Building custom versions without comparing against them risks paying to rebuild something that already exists.
+- *Decision*: Per capability:
+  1. **Anomaly detection**: build, with AWS Cost Anomaly Detection as the baseline to beat. The custom detector is justified by what native tools can't provide: Azure's detected anomalies can't be read by API, GCP's programmatic access is unconfirmed, and none of them score anomalies against the organization's verticals and APM ownership with one method.
+  2. **Rightsizing**: combine. The platform's sizing rules (ADR-003) run for every resource, with the provider's recommendation attached as a cross-check. The rules add what providers don't know: per-workload headroom policy, Terraform management (ADR-005), and APM ownership.
+  3. **RI/SP planning**: combine. Provider purchase recommendations are an input to, and a baseline for, the optimizer (ADR-006). They don't account for staggered expiries across the organization's whole commitment portfolio, cash limits, or planned changes a vertical knows about.
+- *Alternatives considered*: Provider tools alone, rejected; three consoles with three methods and no vertical or APM attribution is roughly today's situation. Building everything and ignoring provider tools, rejected; there would be no baseline to prove the custom work is better, and a real risk of being worse than something free.
+- *Consequences*: One more daily ingestion (`task_provider_recommendations_ingest`, Build Specification §1) and two gold tables. If a custom model can't beat the provider baseline in its eval gate, the provider's output is what users see for that capability and cloud.
+- *Sources*: [References.md](References.md) R7–R13 (provider recommendation and anomaly access).
+
+**ADR-008: Run model inference as batch jobs inside Snowflake, not as container services on Kubernetes**
+- *Context*: Training, the Feature Store, and the registry run in Snowflake for data locality (ADR-004). Inference could run there too, or as container services on Kubernetes next to the platform's other services. Every workload is batch: billing data is about 24 hours late, and each model runs daily, weekly, or on a new invoice.
+- *Decision*: Run inference in Snowflake (Model Registry warehouse inference for trained models, Snowpark stored procedures for rules and the RI/SP optimizer), scheduled by Snowflake Tasks and writing results to gold (§2.5). Use Snowpark Container Services only if a future model needs GPUs or packages the warehouse runtime can't provide. Keep container hosting (CMP) for long-running services: the REST API with MCP tools, and the Temporal workers with OPA.
+- *Alternatives considered*:
+  1. **Containers on Kubernetes (CMP or AKS)**, rejected. Their strengths (low-latency online serving, full runtime control, portability) aren't requirements here. Their costs are: copying cost data out of Snowflake's row access and masking policies, compute that sits idle between daily runs, and a cluster workload to patch and support.
+  2. **A hyperscaler managed endpoint** (Azure ML, SageMaker, Vertex AI), rejected for the same data-movement reason, and because it ties a multi-cloud platform to one provider's ML service.
+- *Consequences*: Inference is limited to Snowflake's supported Python packages and warehouse memory (Snowpark-optimized warehouses cover large in-memory jobs). Model compute is more tied to Snowflake, consistent with Data Foundations ADR-003. If a real low-latency, per-request scoring need appears (for example, scoring every action proposal synchronously), revisit this decision for that workload only.
 
 ---
 
 ## 5. Glossary
 
-**A/B testing (model)** — Shadow-testing a new model version against real traffic, comparing outputs to the current production model before full rollout.
+**A/B testing (model)**: Running a new model version in shadow against real data and comparing its outputs with the current production version before full rollout.
 
-**Data drift** — Incoming real-world data diverging from what a model was trained on.
+**Batch inference**: Scoring a model on a schedule over a table of inputs and writing results to a table, instead of answering individual requests through a live endpoint. How every model in this document runs (§2.5, ADR-008).
 
-**DPIA (Data Protection Impact Assessment)** — A structured screening/assessment of privacy risk for a data use; see §3.1 for why this design doesn't trigger a full one.
+**Data drift**: Incoming data moving away from what a model was trained on.
 
-**Eval gate** — A required evaluation check a model/prompt change must pass before promotion to production.
+**DPIA (Data Protection Impact Assessment)**: A structured assessment of privacy risk for a use of data. §3.1 explains why this design doesn't trigger a full one.
 
-**Feature store** — A governed repository ensuring consistent feature definitions and values across training and serving.
+**Eval gate**: A required evaluation a model, rule, or prompt change must pass before it is promoted to production.
 
-**Human-on-the-loop** — An oversight model where humans monitor and can intervene, but aren't required to review every individual output before it takes effect (contrast: human-in-the-loop, which requires review of each one).
+**Feature store**: A governed repository that keeps feature definitions and values consistent between training and scoring.
 
-**ISO/IEC 42001** — A voluntary, certifiable AI management system standard covering governance, risk, roles, and audit — referenced here (§3.5) as a documentation-practice bar, not a certification target.
+**Human-on-the-loop**: Oversight where people monitor and can intervene but don't review each output before it takes effect. Human-in-the-loop, by contrast, requires review of each one.
 
-**Model card** — A living document per model version recording intended use, subgroup performance, training data lineage, and known limitations (§3.4).
+**ISO/IEC 42001**: A voluntary, certifiable standard for AI management systems covering governance, risk, roles, and audit. Used here (§3.5) as a documentation bar, not a certification target.
 
-**Model drift** — Degradation in a deployed model's prediction quality over time.
+**Model card**: A document per model version recording intended use, subgroup performance, training data lineage, and known limitations (§3.4).
 
-**Model registry (Snowflake Model Registry)** — A versioned catalog of model artifacts, training data snapshots, and hyperparameters; native to Snowflake here rather than a separately operated MLflow tracking server.
+**Model drift**: A decline in a deployed model's prediction quality over time.
 
-**NIST AI Risk Management Framework** — A voluntary US framework organized around four functions (Govern, Map, Measure, Manage); referenced here (§3.5) as the general shape of this document's monitoring and assessment practice.
+**Model registry (Snowflake Model Registry)**: A versioned catalog of model artifacts, training data snapshots, and hyperparameters, built into Snowflake so no separate MLflow server is needed.
 
-**Train/serve skew** — A mismatch between how features are computed at training time versus at inference/serving time, a common source of silent production model quality issues.
+**NIST AI Risk Management Framework**: A voluntary US framework organized around four functions (Govern, Map, Measure, Manage). Used here (§3.5) as the general shape of this document's monitoring and assessment practice.
+
+**Train/serve skew**: A mismatch between how features are computed for training and for scoring, a common cause of silent model quality problems.

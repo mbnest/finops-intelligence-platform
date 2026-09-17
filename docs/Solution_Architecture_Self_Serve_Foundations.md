@@ -1,41 +1,41 @@
 # Solution Architecture: Self-Serve Foundations
 
-Phase 2 of the platform sequenced in `FinOps Solution Overview.md`, alongside Core Intelligence (`Solution_Architecture_MLOps_Pipeline.md`). This document covers non-agentic self-serve only: a governed REST API for other internal teams and tools to consume Core Intelligence's findings and Data Foundations' cost data programmatically, plus a pointer to native BI dashboard access. The agentic, natural-language interface — **Cloud Workbench** — is a separate, later capability, deliberately sequenced as Phase 5 rather than part of this phase; see `Solution_Architecture_Cloud_Workbench.md` and `FinOps Solution Overview.md`'s ADR-M1 for why.
+Phase 2 of the platform sequenced in `FinOps Solution Overview.md`, alongside Core Intelligence (`Solution_Architecture_MLOps_Pipeline.md`). This document covers non-agentic self-serve: a governed REST API that lets other internal teams and tools use Core Intelligence's findings and Data Foundations' cost data, plus a pointer to BI dashboard access. The agentic, natural-language interface, **Cloud Workbench**, comes later as Phase 5. See `Solution_Architecture_Cloud_Workbench.md` and ADR-M1 in `FinOps Solution Overview.md` for the reasoning.
 
-Requirements, org details, and specific tool choices below are **inferred** from JD language and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: `Platform_Build_Specification.md` §7.
+Requirements, org details, and tool choices below are **inferred** from the job description and common enterprise FinOps practice. They are not confirmed the organization facts. Companion: `Platform_Build_Specification.md` §7.
 
 ---
 
 ## 1. Executive Summary
 
-Self-Serve Foundations gives other internal teams and existing BI tooling governed, programmatic access to Core Intelligence's findings and Data Foundations' conformed cost data — a versioned REST API and native BI dashboards, not a chat interface. This is the platform's first outward-facing capability, deliberately simple and deterministic: it proves the data foundation and ML pipeline are trustworthy through an API and a dashboard before Cloud Workbench (Phase 5) adds a conversational, agentic layer on top of the same underlying data.
+Self-Serve Foundations gives internal teams and existing BI tools governed access to Core Intelligence's findings and Data Foundations' conformed cost data, through a versioned REST API and Power BI dashboards. There is no chat interface in this phase. It is the platform's first outward-facing capability and is kept simple and deterministic, so the data foundation and ML pipeline are proven through an API and dashboards before Cloud Workbench (Phase 5) adds a conversational layer over the same data.
 
 ## 2. Business Context & Requirements
 
 ### 2.1 Problem statement (inferred)
 
-Other internal teams and tools need to consume Core Intelligence's findings (anomalies, recommendations) and Data Foundations' cost data without going through the platform team by hand, and without waiting for a more complex conversational interface to be built. A governed API, published once, covers this need at Phase 2. The FinOps team's own reporting and recommendation delivery to business verticals continues via the tools and reports it already uses (Power BI, direct data access) in the meantime — this document doesn't change who does that job, only gives programmatic consumers (not verticals) a faster path to the same underlying data.
+Other internal teams and tools need Core Intelligence's findings (anomalies, recommendations) and Data Foundations' cost data without asking the platform team by hand, and without waiting for a conversational interface. A governed API covers that need in Phase 2. The FinOps team keeps delivering reports and recommendations to business verticals through the tools it already uses (Power BI, direct data access). This document doesn't change who does that work; it gives programmatic consumers a faster path to the same data. Verticals get self-serve in this phase through Power BI dashboards (FR3), not through the API.
 
 ### 2.2 Functional requirements (inferred)
 
-- FR1: Publish a versioned, documented REST API exposing cost lookups, anomaly listings, and open recommendations, for consumption by other internal teams and tools.
-- FR2: Support accepting or rejecting a recommendation via the API, routed through Governed Automation's risk/approval logic exactly like any other proposed action — not a separate, lighter-weight approval path.
-- FR3: Native BI dashboard access — Power BI connects to Snowflake Semantic Views for governed metrics (Data Foundations §4.3); this document doesn't re-specify that path, only points to it.
+- FR1: Publish a versioned, documented REST API for cost lookups, anomaly listings, and open recommendations, for use by other internal teams and tools.
+- FR2: Support accepting or rejecting a recommendation through the API. Accepting routes through Governed Automation's risk and approval logic like any other proposed action; there is no separate, lighter approval path.
+- FR3: Provide BI dashboard access for both personas, the FinOps team and business verticals. Power BI connects to Snowflake Semantic Views for governed metrics, and each vertical sees only its own data through the row access policy (Data Foundations §4.3). This document points to that design instead of repeating it.
 
 ### 2.3 Non-functional requirements (inferred)
 
 | Requirement | Target (inferred) | Rationale |
 |---|---|---|
 | Availability | 99.9% for the API path | Other internal teams depend on it programmatically |
-| API latency | p95 under ~500ms for a simple lookup | A REST API with a request/response budget, not a conversational UX |
+| API latency | p95 under ~500ms for a simple lookup | A request/response API with a latency budget |
 | Data segregation | Hard isolation between verticals' data at query time | Same multi-tenant requirement as every other consumer-facing surface |
 | Auditability | Full reconstructable request lifecycle, retained per policy | HITRUST/SOC2-equivalent governance posture |
 
 ### 2.4 Non-goals (inferred)
 
-- Not a conversational or agentic interface — that's Cloud Workbench, Phase 5 (`Solution_Architecture_Cloud_Workbench.md`), not this document.
-- Not a new BI/reporting product — dashboards are Power BI, connected per Data Foundations §4.3; this document doesn't add a second reporting surface.
-- Not vertical-facing. FR1's consumers are other internal teams and tools, not business verticals directly — the vertical-facing self-serve surface is Cloud Workbench, deferred to Phase 5.
+- Not a conversational or agentic interface. That is Cloud Workbench, Phase 5 (`Solution_Architecture_Cloud_Workbench.md`).
+- Not a new BI or reporting product. Dashboards are Power BI, connected as described in Data Foundations §4.3.
+- The REST API is not vertical-facing. FR1's consumers are internal teams and tools. **Power BI dashboards are vertical-facing**: verticals already receive reports from the FinOps team, and the repointed reports plus the per-vertical variance report (Solution Overview, migration step 4) give each vertical its own data under the same row access policy as every other consumer (Data Foundations §4.3). The conversational surface for verticals is Cloud Workbench, Phase 5.
 
 ---
 
@@ -55,20 +55,20 @@ flowchart TD
 
 ### 4.1 API/service layer
 
-`cost-intelligence-api` (Build Specification §7): a versioned, documented REST API (FastAPI-style) exposing cost lookups, anomaly listings, and recommendation accept/reject — the last of these routing through Governed Automation's `propose_action` entry point (Governed Automation §3.2) exactly like any other proposed action, not a separate approval path. This is the platform's first non-agentic consumer of Governed Automation, live before Cloud Workbench (Phase 5) adds a conversational one alongside it.
+`cost-intelligence-api` (Build Specification §7) is a versioned, documented REST API (FastAPI-style) for cost lookups, anomaly listings, and recommendation accept/reject. Accept/reject goes through Governed Automation's `propose_action` entry point (Governed Automation §3.2), the same as every other proposal source. This makes the API the first non-agentic consumer of Governed Automation, in place before Cloud Workbench (Phase 5) adds a conversational one.
 
 ### 4.2 Dashboards
 
-Power BI connects natively to Snowflake Semantic Views for governed metrics, falling back to gold-schema tables directly only for ad hoc queries not yet modeled as a metric (Data Foundations §4.3, ADR-002, ADR-003) — fully specified there; this document only points to it rather than repeating the design.
+Power BI connects to Snowflake Semantic Views for governed metrics. It queries gold-schema tables directly only for ad hoc questions not yet modeled as a metric (Data Foundations §4.3, ADR-002, ADR-003). The full design lives in Data Foundations.
 
 ---
 
 ## 5. Notes
 
-No architecture decisions specific to this phase are recorded here — the REST API is a straightforward, versioned wrapper over data and logic already governed elsewhere (Data Foundations' semantic layer, Governed Automation's `propose_action`), and the dashboard path is entirely Data Foundations' design. The decisions worth recording live in those documents, not duplicated here.
+No architecture decisions specific to this phase are recorded here. The REST API is a versioned wrapper over data and logic governed elsewhere (Data Foundations' semantic layer, Governed Automation's `propose_action`), and the dashboard path is Data Foundations' design. The decisions are recorded in those documents.
 
 ## 6. Glossary
 
-Every term this document uses — Semantic Views, gold layer, governed metrics, `propose_action` — is already defined in Data Foundations' or Governed Automation's glossary, cited throughout above; not repeated here to avoid a second, driftable copy.
+Terms used here, such as Semantic Views, gold layer, governed metrics, and `propose_action`, are defined in the Data Foundations and Governed Automation glossaries and are not repeated.
 
-**`cost-intelligence-api`** — This phase's REST API (Build Specification §7); the one thing named here and nowhere else in the document set.
+**`cost-intelligence-api`**: This phase's REST API (Build Specification §7), which later also serves the MCP tools and the Cloud Workbench agent.

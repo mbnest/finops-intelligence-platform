@@ -1,44 +1,44 @@
-# Solution Architecture: Governed Automation — The Horizontal/Vertical Contract
+# Solution Architecture: The Horizontal/Vertical Contract (Governed Automation)
 
-Phase 3 extension of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md). This document extends [Solution_Architecture_Governed_Automation.md](Solution_Architecture_Governed_Automation.md) — it does not restate that document's Orchestrator/Guardrail Engine design, only what's genuinely new: the contract entity §3.4 there flagged as not yet designed. Originated in `FinOps Opportunities.md` §2c.
+Phase 3 extension of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md). This document extends [Solution_Architecture_Governed_Automation.md](Solution_Architecture_Governed_Automation.md) with the contract entity that document's §3.4 relies on. It doesn't restate the Orchestrator or Guardrail Engine design. The contract concept comes from `FinOps Opportunities.md` §2c.
 
-Requirements and specifics below are **inferred** from `FinOps Opportunities.md` §2c and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §6 (the illustrative `contracts` table, now finalized against this document).
+Requirements below are **inferred** from `FinOps Opportunities.md` §2c and common enterprise FinOps practice. They are not confirmed the organization facts. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §6 (the `contracts` table).
 
 ---
 
 ## 1. Executive Summary
 
-Governed Automation's FR3 requires an explicit, opt-in agreement between an owning application team and the platform team before automation acts on that team's resources **at any tier, including LOW** — absent one, every proposed action for that team defaults to fully advisory. This document designs that agreement: its schema, lifecycle, how it's actually signed, and how the Orchestrator checks for it before a proposed action is ever classified. It does not redesign risk classification itself (Governed Automation §3.1's OPA policy rules) or the Orchestrator's execution mechanics — those are unchanged; this document adds one gate in front of them.
+Governed Automation's FR3 requires an explicit, opt-in agreement between an owning application team and the platform team before automation acts on that team's resources, **at any tier, including LOW**. Without one, every proposed action for that team is advisory. This document designs that agreement: its schema, lifecycle, how it is signed, and how the Orchestrator checks for it before a proposed action is classified. Risk classification (Governed Automation §3.1's OPA policies) and the Orchestrator's execution steps don't change; this document adds one gate in front of them.
 
 ## 2. Business Context & Requirements
 
 ### 2.1 Problem statement (inferred)
 
-Without this entity, Governed Automation's own FR3 is unenforceable — there is no contract to check for, so "absent a signed agreement, defaults to advisory" has nothing to consult. `FinOps Opportunities.md` §2c already enumerates what the agreement needs to define (pre-approved actions, notification requirements, change windows, rollback guarantee, escalation path, a review/renewal cadence) and notes that because it's keyed on the APM ID — the same key already used for tagging, security, and GRC — the identity/ownership plumbing likely already exists; what's missing is the schema and a mechanism to capture consent, not the underlying identity model.
+Without a contract entity, Governed Automation's FR3 can't be enforced: "no signed agreement means advisory" needs something to look up. `FinOps Opportunities.md` §2c lists what the agreement must define (pre-approved actions, notification requirements, change windows, rollback guarantee, escalation path, review cadence). Because it is keyed on the APM ID, which tagging, security, and GRC already use, the identity and ownership data likely exists. What's missing is the schema and a way to capture consent.
 
 ### 2.2 Functional requirements (inferred)
 
-- FR1: Store one contract per application team (keyed on APM ID) defining: pre-approved action scope, tier scope (LOW-only vs. full MEDIUM/HIGH), notification requirements, change-window constraints, rollback guarantee, escalation path, and a review/renewal cadence. Requires **dual sign-off** — both the APM Owner and the APM Secondary Approver (Data Foundations §4.4) — before a contract becomes active; neither signature alone is sufficient.
-- FR2: Before `classify_action_risk` runs, check whether an active contract exists for the proposed action's APM ID. If none exists, the action is fully advisory regardless of what classification would have produced (Governed Automation FR3) — the check happens first, not as a side effect of classification.
-- FR3: A contract can opt into *stricter* handling than the platform's default risk classification would otherwise apply (e.g., an application team can require human approval even for actions the platform-wide policy would classify LOW) — but cannot loosen it. A team can ask for more caution than OPA's rules provide; it cannot ask for less.
-- FR4: Support a contract lifecycle — draft, active, amended, revoked, expired — with every transition audited (who, when, why).
-- FR5: An in-flight proposed action that started under an active contract completes under the terms that were active when it started; a revocation or amendment takes effect for actions proposed after it, not ones already running.
-- FR6: Where the contract's change-window constraint applies (MEDIUM-tier timing), consult the change-management/CAB calendar it references — system of record not yet confirmed with the organization (see §3.4 and ADR-4).
-- FR7: Escalate a significant finding (a Core Intelligence recommendation, a Cloud Workbench Expansion push signal, or a self-initiated what-if proposal) that receives no explicit disposition — accepted, rejected, or actioned — within a defined SLA window, per a dollar-savings or risk/config-severity threshold (§3.6). Escalation always requires FinOps/platform team review and approval of the underlying suggestion **before** a Change Request is generated — a lapsed SLA never auto-generates a CR without a human confirming the suggestion is worth escalating first.
+- FR1: Store one contract per application team, keyed on APM ID, defining the pre-approved action scope, tier scope (LOW-only or full MEDIUM/HIGH), notification requirements, change-window constraints, rollback guarantee, escalation path, review cadence, and execution mode (`dry_run` or `live`; every contract starts in `dry_run`, Governed Automation §3.6). A contract needs **two signatures**, the APM Owner's and the APM Secondary Approver's (Data Foundations §4.4), before it becomes active. Either alone isn't enough.
+- FR2: Before `classify_action_risk` runs, check for an active contract for the proposed action's APM ID. If there isn't one, the action is advisory whatever classification would have produced (Governed Automation FR3). The check happens first, not as a side effect of classification.
+- FR3: A contract can ask for *stricter* handling than the platform's default classification (for example, human approval for actions the platform would classify LOW). It can never ask for looser handling.
+- FR4: Support a contract lifecycle (draft, active, amended, revoked, expired), with every transition audited: who, when, and why.
+- FR5: A proposed action that started under an active contract finishes under the terms in force when it started. A revocation or amendment applies to actions proposed afterward, not to running ones.
+- FR6: Where the contract's change-window constraint applies (MEDIUM-tier timing), consult the change-management/CAB calendar it references. The system of record isn't confirmed (§3.4, ADR-4).
+- FR7: Escalate a significant finding (a Core Intelligence recommendation, a Cloud Workbench Expansion push signal, or a what-if proposal) that gets no explicit disposition (accepted, rejected, or actioned) within an SLA window, using a dollar-savings or risk/config-severity threshold (§3.6). The FinOps/platform team must review and approve the suggestion **before** a Change Request is generated. A lapsed SLA never generates a CR on its own.
 
 ### 2.3 Non-functional requirements (inferred)
 
 | Requirement | Target (inferred) | Rationale |
 |---|---|---|
-| Auditability | Every contract creation, amendment, and revocation logged with who acted and when | Same HITRUST/SOC2-equivalent posture as the rest of the platform; a contract is what authorizes automation, so its own history has to be as auditable as the actions it authorizes |
-| Check latency | The contract-existence check adds negligible latency to `propose_action` — a single indexed lookup, not a network call to an external system | It runs on every single proposed action, including LOW tier; it can't become the workflow's bottleneck |
-| Staleness prevention | A contract without a renewal within its review cadence (FR1) is flagged, not silently left active indefinitely | Opportunities §2c's own concern — an agreement that doesn't get revisited goes stale |
+| Auditability | Every contract creation, amendment, and revocation logged with who acted and when | A contract authorizes automation, so its history needs the same audit trail as the actions it authorizes (HITRUST/SOC2-equivalent posture) |
+| Check latency | The contract check adds negligible latency to `propose_action`: one indexed lookup, no external call | It runs on every proposed action, including LOW tier |
+| Staleness prevention | A contract not renewed within its review cadence (FR1) is flagged and expires | Opportunities §2c's concern: an agreement nobody revisits goes stale |
 
 ### 2.4 Non-goals (inferred)
 
-- **Not a general contract-management or e-signature platform.** This document assumes a Teams-native approval card sent to the APM Owner and Secondary Approver (see ADR-3), not a dedicated signing tool — reconsider only if the organization already has one in active use elsewhere.
-- **Not a change to risk classification itself.** OPA's policy rules (Governed Automation §3.1) are unchanged; a contract can request stricter handling (FR3) but never overrides the platform's own classification downward.
-- **Not the CAB/change-management process itself.** This document consults an existing change calendar (FR6); it doesn't design change management as a discipline.
+- **Not a contract-management or e-signature platform.** Signing uses a Teams approval card sent to the APM Owner and Secondary Approver (ADR-3). Revisit only if the organization already uses a signing tool for this kind of approval.
+- **Not a change to risk classification.** OPA's policies (Governed Automation §3.1) don't change. A contract can request stricter handling (FR3) but never lowers the platform's classification.
+- **Not the CAB/change-management process.** This document reads an existing change calendar (FR6); it doesn't design change management.
 
 ---
 
@@ -47,110 +47,110 @@ Without this entity, Governed Automation's own FR3 is unenforceable — there is
 ```mermaid
 flowchart TD
     P[Proposed action] --> CHECK{"check_contract_exists<br/>(Activity)"}
-    CHECK -->|no active contract| ADV["Fully advisory<br/>— human reviews and acts manually"]
+    CHECK -->|no active contract| ADV["Fully advisory:<br/>a person reviews and acts manually"]
     CHECK -->|active contract found| R["classify_action_risk<br/>(Guardrail Engine, unchanged)"]
-    R -->|contract requests stricter handling| STRICT["Upgrade tier per contract's<br/>own request (FR3) — never downgrade"]
-    STRICT --> CONT["Continue into Orchestrator's<br/>existing LOW/MEDIUM/HIGH routing"]
+    R -->|contract requests stricter handling| STRICT["Upgrade tier per the contract's<br/>request (FR3), never downgrade"]
+    STRICT --> CONT["Continue into the Orchestrator's<br/>LOW/MEDIUM/HIGH routing"]
     R --> CONT
 ```
 
-This inserts one Activity, `check_contract_exists`, at the front of Governed Automation's existing workflow (§3.3 there) — everything after it (risk classification, the LOW/MEDIUM/HIGH branch, execution, rollback) is unchanged.
+This adds one Activity, `check_contract_exists`, to Governed Automation's workflow (§3.3 there), right after the kill-switch check. Everything after it (risk classification, tier routing, execution, rollback) is unchanged.
 
 ### 3.1 Contract lifecycle
 
 | State | Meaning | Transitions in |
 |---|---|---|
-| `draft` | Proposed, awaiting dual sign-off | Initial state |
-| `active` | Both the APM Owner and Secondary Approver have signed (§3.2); automation for this APM ID checks it | From `draft`, once **both** signatures are recorded — either alone leaves it in `draft` |
-| `amended` | An active contract's terms are being changed | From `active`; becomes `active` again once re-approved by **both** signers |
-| `revoked` | Explicitly withdrawn by either party | From `active` or `amended`; in-flight actions unaffected (FR5) |
-| `expired` | Past its review/renewal cadence (FR1) without renewal | From `active`, automatic on cadence lapse; treated the same as `revoked` for gating purposes |
+| `draft` | Proposed, waiting for both signatures | Initial state |
+| `active` | The APM Owner and Secondary Approver have both signed (§3.2); automation for this APM ID uses it | From `draft`, once **both** signatures are recorded |
+| `amended` | An active contract's terms are being changed | From `active`; returns to `active` once **both** signers re-approve |
+| `revoked` | Withdrawn by either party | From `active` or `amended`; running actions are unaffected (FR5) |
+| `expired` | Past its review cadence (FR1) without renewal | From `active`, automatically when the cadence lapses; gated the same as `revoked` |
 
 ### 3.2 Signing mechanism
 
-A Teams-native approval card, not a standalone web-form, generic ticket queue, or dedicated e-signature tool (ADR-3): the platform team drafts the contract's terms (pre-approved actions, tier scope, change window, etc.), and the system sends an Adaptive Card — Approve/Reject buttons, a summary of terms, and a link to the full contract for detailed review — to **both** the APM Owner and the APM Secondary Approver (`bronze.apm_application_metadata.owner_current`/`secondary_approver_current`, Data Foundations §4.4), independently. A click on either card carries that person's own Teams identity — there's no separate login or link-based access to build, and no risk of an unauthenticated party clicking an emailed link, since the card itself is scoped to the Teams user it was sent to. The contract moves to `active` only once **both** cards are approved (FR1); either alone leaves it in `draft`.
+Contracts are signed with a Teams approval card (ADR-3). The platform team drafts the terms (pre-approved actions, tier scope, change window, and so on), and the system sends an Adaptive Card to **both** the APM Owner and the APM Secondary Approver (`bronze.apm_application_metadata.owner_current` and `secondary_approver_current`, Data Foundations §4.4), separately. Each card has Approve and Reject buttons, a summary of the terms, and a link to the full contract. A click carries that person's Teams identity, so there is no separate login to build, and nobody outside the intended recipient can act on the card. The contract becomes `active` only when **both** cards are approved (FR1).
 
-This has two real dependencies worth naming, not hiding:
-- **The approval routes are only as good as the Owner/Secondary Approver fields they're sent to.** If `dq_check_owner_staleness` (Build Specification §2) has this APM ID flagged for either role, contract creation should surface that before sending either card, not silently send an approval request into a stale assignment.
-- **Dual sign-off is genuine dual control, not redundancy.** The Owner and Secondary Approver are two independent, required signatures — this is what gives audit/security/GRC (rather than one person's unilateral judgment) confidence that granting automation authority over an application's resources was a considered decision, not a rubber stamp. It is not designed as a backup path for when one signer is unavailable; if that becomes a real operational problem, it should be solved explicitly (e.g., a designated delegate), not by quietly treating either signature as sufficient.
+Two dependencies:
+- **Approvals are only as good as the Owner and Secondary Approver fields.** If `dq_check_owner_staleness` (Build Specification §4) flags either role for this APM ID, contract creation shows that before any card is sent.
+- **The two signatures are dual control, not a backup.** Two independent, required approvals give audit, security, and GRC confidence that granting automation authority over an application was a considered decision, not one person's call. If an unavailable signer becomes a real operational problem, solve it explicitly (for example, a named delegate), not by accepting one signature.
 
-Notification that a contract is pending, and reminders for an unactioned `draft`, still ride the platform's shared Teams + ITSM channels (Data Foundations §4.5) — the approval card is the specific mechanism within that channel that this action uses, not a separate notification path.
+Notifications that a contract is pending, and reminders for a stalled `draft`, use the platform's shared Teams and ITSM channels (Data Foundations §4.5). The approval card is the specific mechanism this action uses within that channel.
 
 ### 3.3 Enforcement: `check_contract_exists`
 
-Runs as the first Activity in the Orchestrator's workflow (Governed Automation §3.3), before `classify_action_risk`: looks up an `active` contract for the proposed action's APM ID in Postgres (same store as the approval queue, ADR-003 there — a transactional lookup, not an analytical one). No active contract found → the workflow short-circuits to fully advisory and ends; a human is notified via the standard alerting channels that this application team has no automation contract in place. Contract found → proceeds into `classify_action_risk` exactly as Governed Automation §3.3 already describes, with FR3's tier-upgrade check applied if the contract requests stricter handling than the platform default.
+Runs in the Orchestrator's workflow (Governed Automation §3.3) after `check_automation_enabled` and before `classify_action_risk`. It looks up an `active` contract for the proposed action's APM ID in Postgres, the same store as the approval queue (Governed Automation ADR-003). If none is found, the workflow ends as advisory, and the team is notified through the standard channels that this application has no automation contract. If one is found, the workflow continues into `classify_action_risk` as described in Governed Automation §3.3, applying FR3's tier upgrade if the contract requests stricter handling.
 
 ### 3.4 Change-window / CAB integration
 
-FR6's change-window constraint needs a real system of record to check against. **Assumed**: a CAB/change-management process exists (Governed Automation §3.5 already adopted this at the organization's organizational scale), backed by a **CAB/ITSM system** — the same platform this document set already assumes handles ticketing/paging elsewhere (Data Foundations §4.5). `change_window` on the contract record (Build Specification §6) references that system's change-request/blackout-calendar lookup, queried at proposal time by the same Orchestrator step that already consults the contract (§3.3). Which specific product sits behind "CAB/ITSM system" is an implementation detail for whoever builds this, not a design dependency this document carries.
+FR6's change-window constraint needs a system of record. **Assumed**: a CAB/change-management process exists at the organization's scale (Governed Automation §3.5), backed by the same **CAB/ITSM system** the platform assumes for ticketing and paging (Data Foundations §4.5). `change_window` on the contract record (Build Specification §6) references that system's change-request or blackout-calendar lookup, which the Orchestrator queries when it checks the contract (§3.3). Which product sits behind "CAB/ITSM system" is an implementation detail.
 
 ### 3.5 Revocation and amendment handling
 
-Per FR5: revocation or amendment updates the contract's state for any *future* `check_contract_exists` lookup, but doesn't reach into an already-running Temporal workflow. This avoids a real failure mode — interrupting a partially-executed infrastructure action mid-flight because a contract changed a moment ago is a worse outcome than letting it finish under the terms it validly started under.
+Per FR5, a revocation or amendment changes what future `check_contract_exists` lookups return. It doesn't reach into a Temporal workflow that is already running. Interrupting a half-executed infrastructure change because a contract changed a moment ago is a worse outcome than letting an authorized action finish. To stop running actions immediately, use the kill switch (Governed Automation §3.6), which is checked again right before execution.
 
 ### 3.6 Disposition SLA and escalation
 
-The gap this closes: today, a significant finding that isn't auto-executed (HIGH tier, or a vertical declines to act) is logged and relevant parties are notified — and then nothing necessarily happens. FR7 turns silence into a forcing function without removing human judgment from the decision.
+Today, a significant finding that isn't executed automatically (HIGH tier, or a vertical declines to act) is logged and people are notified, and then nothing necessarily happens. FR7 forces a decision without taking human judgment out of it.
 
-**Lifecycle** (tracked per finding, independent of the contract's own lifecycle in §3.1):
+**Lifecycle**, tracked per finding and separate from the contract lifecycle in §3.1:
 
 | State | Meaning | Transitions in |
 |---|---|---|
-| `pending_disposition` | Finding surfaced (recommendation, push signal, or what-if proposal), notified via the standard Teams + ITSM channels (Data Foundations §4.5) | Initial state, on surfacing |
-| `escalation_review` | The SLA window lapsed with no explicit accept/reject/action decision; queued for FinOps/platform team review | From `pending_disposition`, automatic on SLA lapse |
+| `pending_disposition` | Finding surfaced (recommendation, push signal, or what-if proposal) and notified through the standard Teams and ITSM channels (Data Foundations §4.5) | Initial state |
+| `escalation_review` | The SLA window lapsed with no accept, reject, or action decision; queued for FinOps/platform team review | From `pending_disposition`, automatically on SLA lapse |
 | `escalation_approved` | The platform team confirmed the finding is worth escalating | From `escalation_review` |
-| `escalation_declined` | The platform team reviewed and decided not to escalate (e.g., stale, already superseded, not actually actionable) | From `escalation_review`; this **is** a disposition — the SLA's purpose is forcing a decision, not forcing action |
-| `cr_generated` | A Change Request has been submitted into the CAB/ITSM system (§3.4) for CAB's own approval process | From `escalation_approved` |
-| `dispositioned` | Terminal state — finding was actioned, explicitly rejected, or declined at escalation review | From any state once a decision is recorded |
+| `escalation_declined` | The platform team decided not to escalate (stale, superseded, or not actionable) | From `escalation_review`. This **is** a disposition: the SLA forces a decision, not an action |
+| `cr_generated` | A Change Request was submitted to the CAB/ITSM system (§3.4) for CAB's own approval | From `escalation_approved` |
+| `dispositioned` | Terminal: the finding was actioned, explicitly rejected, or declined at escalation review | From any state once a decision is recorded |
 
-**The threshold** (what counts as "significant," per FR7): a dollar-savings amount or a risk/config-severity flag, defined per contract where a specific application team has agreed to different terms (§2.2 FR1), falling back to a platform-wide default otherwise — the same "contract can request stricter, never looser" principle FR3 already establishes for risk tiering, applied here to escalation sensitivity.
+**Threshold** for "significant" (FR7): a dollar-savings amount or a risk/config-severity flag. A contract can set stricter terms for its application (§2.2 FR1); otherwise a platform-wide default applies. As with risk tiers (FR3), a contract can ask for more sensitivity, never less.
 
-**The human gate is deliberate, not incidental.** A lapsed SLA alone doesn't generate a CR — it routes the finding to the FinOps/platform team via the same Teams approval-card mechanism §3.2 already uses, and only their approval generates one. This prevents a stale or low-quality finding from automatically consuming CAB's own review capacity; it mirrors Governed Automation's own HIGH-tier principle (mandatory human approval, no exception) applied to a different kind of consequential action — submitting something into an external governance process, not executing infrastructure change directly.
+**Human gate.** A lapsed SLA doesn't generate a CR. It sends the finding to the FinOps/platform team through the same Teams approval card as §3.2, and only their approval generates one. That keeps stale or low-quality findings out of CAB's queue. It is the same principle as Governed Automation's HIGH tier (mandatory human approval), applied to submitting something into an external governance process.
 
 ---
 
 ## 4. Architecture Decision Records
 
-**ADR-1: Check contract existence as its own Activity, before risk classification, not folded into it**
-- *Context*: FR2 requires every proposed action, including LOW tier, to check for an active contract before anything else happens.
-- *Decision*: `check_contract_exists` runs first, as its own Activity — mirrors Governed Automation's own pattern of `check_iac_managed` being a distinct Activity rather than logic buried inside `execute_action`.
-- *Alternatives considered*: Folding the check into `classify_action_risk` itself, rejected — conflates "is automation even authorized" with "what tier is this," two different questions that shouldn't share one Activity's failure modes.
-- *Consequences*: One more Activity per workflow instance; negligible latency cost for a single indexed lookup, per §2.3's NFR.
+**ADR-1: Check for a contract in its own Activity, before risk classification**
+- *Context*: FR2 requires every proposed action, including LOW tier, to have an active contract before classification.
+- *Decision*: `check_contract_exists` is its own Activity that runs before `classify_action_risk`, the same way `check_iac_managed` is separate from `execute_action`.
+- *Alternatives considered*: Checking inside `classify_action_risk`, rejected. "Is automation authorized at all" and "what tier is this" are different questions and shouldn't share failure modes.
+- *Consequences*: One more Activity per workflow, costing one indexed lookup (§2.3).
 
-**ADR-2: In-flight actions complete under the contract terms active when they started (FR5)**
-- *Context*: A contract can be revoked or amended while actions proposed under it are still executing.
-- *Decision*: Revocation/amendment affects future `check_contract_exists` lookups only; a running workflow isn't interrupted.
-- *Alternatives considered*: Real-time interruption of in-flight workflows on revocation, rejected — introduces a new failure mode (a partially-executed infrastructure action abandoned mid-way) that's worse than letting an already-authorized action finish.
-- *Consequences*: A brief window where a revoked team's already-in-flight action still completes — acceptable given the alternative, and consistent with how this platform treats every other in-progress state (Governed Automation's own audit trail, §3.3).
+**ADR-2: Running actions finish under the contract terms in force when they started (FR5)**
+- *Context*: A contract can be revoked or amended while actions proposed under it are running.
+- *Decision*: Revocations and amendments affect future `check_contract_exists` lookups only. Running workflows aren't interrupted.
+- *Alternatives considered*: Interrupting running workflows on revocation, rejected. Abandoning a half-executed infrastructure action is worse than letting an authorized one finish.
+- *Consequences*: A revoked team's in-flight action can still complete. The kill switch (Governed Automation §3.6) covers the case where something must stop immediately.
 
-**ADR-3: A Teams-native dual-approval card (Owner + Secondary Approver), not a web-form, ticket queue, or e-signature tool**
-- *Context*: Contracts are signed infrequently (once per application team, occasionally amended); this platform already has authoritative answers to "who can speak for this application" — the APM Owner and Secondary Approver (Data Foundations §4.4) — and Teams is already the platform's shared notification channel (Data Foundations §4.5), with its own identity model already solving authentication.
-- *Decision*: Send an Adaptive Card with Approve/Reject actions to both the Owner and Secondary Approver via Teams; each click carries that Teams user's own identity, populating `owner_signed_by`/`owner_signed_at` or `secondary_approver_signed_by`/`secondary_approver_signed_at` respectively (Build Specification §6). Both required before the contract moves to `active`.
-- *Alternatives considered*: A standalone web-form (an earlier version of this decision), rejected on reconsideration — it would need its own login/auth build, where a Teams card inherits identity from the platform already in use. A single-signer approval, rejected once dual control was identified as a real audit/security/GRC need, not just a nice-to-have. A generic ticket queue, rejected — doesn't name who specifically approves. A dedicated e-signature platform, rejected as unnecessary for this volume.
-- *Consequences*: Still needs a Teams bot/app registration to send and process Adaptive Card actions (a build item, just a different one than a standalone web-form) — no new deployable in the sense of a hosted webpage, but not zero-cost either. Reliability now depends on two fields' freshness (`dq_check_owner_staleness` for both roles) instead of one. An unactioned `draft` needs a reminder cadence through the same Teams channel, or it can sit indefinitely — a safe failure mode (stays advisory) but a real adoption-friction risk if nothing nudges a stalled approval.
+**ADR-3: A Teams approval card with two signers (Owner and Secondary Approver)**
+- *Context*: Contracts are signed rarely (once per application team, with occasional amendments). The APM Owner and Secondary Approver (Data Foundations §4.4) already answer "who can speak for this application," and Teams is already the platform's notification channel, with its own identity handling.
+- *Decision*: Send an Adaptive Card with Approve and Reject actions to both the Owner and the Secondary Approver. Each click records that Teams user's identity in `owner_signed_by`/`owner_signed_at` or `secondary_approver_signed_by`/`secondary_approver_signed_at` (Build Specification §6). Both are required before the contract becomes `active`.
+- *Alternatives considered*: A standalone web form, rejected; it would need its own login and authentication, while a Teams card inherits identity. A single signer, rejected; audit, security, and GRC need dual control for granting automation authority. A generic ticket queue, rejected; it doesn't name who must approve. A dedicated e-signature platform, rejected as unnecessary at this volume.
+- *Consequences*: Needs a Teams bot/app registration to send cards and process clicks, which is a build item even without a hosted web page. Reliability depends on both the Owner and Secondary Approver fields staying current (`dq_check_owner_staleness`). A `draft` nobody acts on needs reminders through Teams; left alone it stays advisory, which is safe but slows adoption.
 
-**ADR-4: Assume a CAB/ITSM system of record for the change-window check, rather than naming a specific product**
-- *Context*: FR6 needs a real calendar to check against. Governed Automation §3.5 already assumes a CAB/change-management process exists at the organization's scale, backed by the same CAB/ITSM system this platform assumes elsewhere (Data Foundations §4.5).
-- *Decision*: Design §3.4's integration against a generic CAB/ITSM system, referenced by that role rather than a specific product name — the integration point matters more than which vendor sits behind it.
-- *Alternatives considered*: Naming a specific real product by guess, rejected — no evidence points to any one product, and guessing wrong is worse than staying generic. Leaving this fully open with no system named at all, rejected — the integration point (a change-request/blackout-calendar lookup) is still worth designing even generically.
-- *Consequences*: §3.4's design holds regardless of which specific product the organization actually runs; only the concrete lookup call changes once that's known, not the architecture around it.
+**ADR-4: Design the change-window check against a generic CAB/ITSM system**
+- *Context*: FR6 needs a calendar to check. Governed Automation §3.5 assumes a CAB/change-management process at the organization's scale, backed by the same CAB/ITSM system assumed elsewhere (Data Foundations §4.5).
+- *Decision*: Design §3.4's integration against a generic CAB/ITSM system, named by role rather than product.
+- *Alternatives considered*: Guessing a specific product, rejected, since nothing points to one. Leaving it undesigned, rejected, since the integration point (a change-request or blackout-calendar lookup) can be designed generically.
+- *Consequences*: The design holds whichever product the organization runs. Only the concrete lookup call changes once it is known.
 
-**ADR-5: Require human review and approval before a lapsed finding generates a Change Request — never auto-generate on SLA lapse alone**
-- *Context*: FR7's disposition SLA exists to turn silent inaction into a forcing function, but a purely automatic escalation (SLA lapses → CR auto-submitted) risks flooding CAB's own review queue with stale, superseded, or low-quality findings nobody has actually looked at.
-- *Decision*: An SLA lapse routes the finding to the FinOps/platform team for review (`escalation_review`, §3.6); only their explicit approval generates a CR. A decline is itself a valid, terminal disposition — the mechanism's purpose is forcing a decision, not forcing action.
-- *Alternatives considered*: Auto-generating a CR directly on SLA lapse, rejected — treats CAB's queue as a dumping ground for unreviewed findings and removes the one thing that made escalation credible: a human confirmed it's actually worth CAB's time. Skipping escalation entirely and relying on the original notification alone, rejected — that's the status quo this ADR exists to fix.
-- *Consequences*: One more human touchpoint per escalated finding, on top of the original notification — an intentional cost, since the alternative is either noise in CAB's queue or the original "advisement and nothing happens" problem persisting unchanged.
+**ADR-5: Require human approval before a lapsed finding generates a Change Request**
+- *Context*: FR7's SLA is meant to end silent inaction, but fully automatic escalation (SLA lapses, CR submitted) would fill CAB's queue with findings nobody has looked at.
+- *Decision*: An SLA lapse sends the finding to the FinOps/platform team (`escalation_review`, §3.6). Only their explicit approval generates a CR. A decline is a valid terminal disposition.
+- *Alternatives considered*: Generating a CR automatically on SLA lapse, rejected; it treats CAB's queue as a dumping ground and removes the human confirmation that makes escalation credible. No escalation, relying on the original notification, rejected; that is the current problem.
+- *Consequences*: One more human step per escalated finding, accepted as the cost of keeping CAB's queue meaningful.
 
 ---
 
 ## 5. Glossary
 
-**Contract (automation consent)** — The per-application, per-vertical agreement, keyed on the APM ID, that Governed Automation's `check_contract_exists` consults before any automation acts on that team's resources, at any tier. Distinct from Data Foundations/Bill Verification's `RateCard` and unrelated to it — this "contract" is about automation consent, not vendor pricing.
+**Contract (automation consent)**: The per-application agreement, keyed on the APM ID, that `check_contract_exists` looks up before automation acts on that team's resources at any tier. Unrelated to the `RateCard` in Data Foundations and Bill Verification, which is about vendor pricing.
 
-**`check_contract_exists`** — The Activity, added by this document to Governed Automation's workflow (§3.3 there), that gates every proposed action on an active contract existing for its APM ID before risk classification runs.
+**`check_contract_exists`**: The Activity in Governed Automation's workflow (§3.3 there) that requires an active contract for the action's APM ID before risk classification runs.
 
-**Tier scope** — A contract's declared coverage: LOW-only automation, or full MEDIUM/HIGH-tier autonomy. Distinct from a tier *upgrade* request (FR3), which asks for stricter-than-default handling on top of whatever scope is granted.
+**Tier scope**: A contract's coverage: LOW-only automation, or MEDIUM/HIGH as well. Different from a tier *upgrade* request (FR3), which asks for stricter-than-default handling within that scope.
 
-**Dual control (Owner + Secondary Approver)** — This document's requirement that both the APM Owner and APM Secondary Approver (Data Foundations §4.4) independently approve a contract before it activates. Deliberately not a backup/redundancy pattern (either signing is not sufficient) — the point is two independent sign-offs, for the same audit/security/GRC reasons this platform requires human approval at all for HIGH-tier actions.
+**Dual control (Owner + Secondary Approver)**: The requirement that both the APM Owner and the APM Secondary Approver (Data Foundations §4.4) approve a contract before it activates. Neither signature alone is sufficient.
 
-**Disposition SLA** — FR7's mechanism: a significant finding with no explicit accept/reject/action decision within a defined window escalates to FinOps/platform team review, and only their approval generates a Change Request. Turns silent inaction into a forced decision, without forcing action itself — a decline is a valid outcome.
+**Disposition SLA**: FR7's mechanism. A significant finding with no accept, reject, or action decision within the window goes to FinOps/platform team review, and only their approval generates a Change Request. It forces a decision, not an action; declining is a valid outcome.

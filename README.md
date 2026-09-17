@@ -1,10 +1,10 @@
-# FinOps Intelligence Platform — Solution Architecture
+# FinOps Intelligence Platform: Solution Architecture
 
-A complete, from-scratch solution architecture for a governed, AI-assisted FinOps platform — reconstructed current state, identified opportunities, five-phase target-state design, build-ready specifications, and a migration plan, all in one continuous, cross-referenced document set.
+A from-scratch solution architecture for a governed, AI-assisted FinOps platform: a reconstructed current state, the opportunities, a five-phase target design, build-ready specifications, and a migration plan, in one cross-referenced document set.
 
 | | |
 |---|---|
-| **Status** | Draft — unvalidated (by design; see [Methodology](#methodology--honest-limitations)) |
+| **Status** | Draft, unvalidated (by design; see [Methodology](#methodology--limitations)) |
 | **Author** | Matt Nestman |
 | **Last updated** | 2026-09-17 |
 
@@ -12,84 +12,91 @@ A complete, from-scratch solution architecture for a governed, AI-assisted FinOp
 
 ## What this is
 
-This repository reasons through an ambiguous, high-stakes architecture problem from limited external signal — a job posting and an informal conversation about the organization — with no insider access, system review, or interviews. From that starting point it:
+This repository works through an ambiguous, high-stakes architecture problem from limited outside information: a job posting and an informal conversation about the organization, with no insider access, system review, or interviews. From that starting point it:
 
-1. Reconstructs a credible **current-state** FinOps practice ([`FinOps Current State.md`](docs/FinOps%20Current%20State.md)),
-2. Identifies the **opportunities** a modern platform unlocks ([`FinOps Opportunities.md`](docs/FinOps%20Opportunities.md)),
-3. Designs the **target-state platform** end to end — architecture, data model, AI governance, ADRs, build-ready specs, and a migration/cutover plan across thirteen cross-referenced documents,
-4. Names the underlying agentic-systems patterns explicitly rather than leaving them implicit: a durable-workflow **Orchestrator** (Temporal) kept deliberately separate from a policy-as-code **Guardrail Engine** (OPA), and — for Cloud Workbench, the one genuinely agentic surface in this platform — a **bounded, explicitly-graphed agent** (pydantic-graph: typed nodes and edges, dynamic tool selection via MCP, and the ability to self-initiate a governed action) chosen deliberately over a more autonomous framework like LangGraph or CrewAI, for the auditability a regulated, financial-adjacent domain requires. Not one black-box agent loop deciding both what to do and whether it's safe to do it, and not an open-ended planner either.
+1. Reconstructs the **current-state** FinOps practice ([`FinOps Current State.md`](docs/FinOps%20Current%20State.md)).
+2. Identifies the **opportunities** a modern platform opens up ([`FinOps Opportunities.md`](docs/FinOps%20Opportunities.md)).
+3. Designs the **target platform** end to end: architecture, data model, ML and AI governance, ADRs, build-ready specifications, an operating model, and a migration plan, across fourteen cross-referenced documents.
+4. Makes the agentic design explicit. A durable-workflow **Orchestrator** (Temporal) is kept separate from a policy-as-code **Guardrail Engine** (OPA), so no single component decides both what to do and whether it is safe. Cloud Workbench, the platform's one agentic surface, is a **bounded agent with an explicit graph** (pydantic-graph: typed nodes and edges, tools over MCP, and the ability to propose a governed action but never execute one), chosen over more autonomous frameworks such as LangGraph or CrewAI for the auditability a financial domain needs.
 
-**A note on the company name.** the organization is a real company, referenced because a real job posting named it. Nothing in this repository is confirmed the organization fact, and every document says so, repeatedly, on purpose — this is not an insider account of the organization's actual systems, and it isn't affiliated with or endorsed by the organization. The point of this exercise isn't "here's what the organization's FinOps platform is." It's "here's how I approach the problem, and how far I take it when nobody's stopping me."
+**On the company name.** the organization is a real company, named because a real job posting named it. Nothing in this repository is confirmed the organization fact, and every document says so. This is not an insider account of the organization's systems, and it isn't affiliated with or endorsed by the organization. The point is not "here is the organization's FinOps platform"; it is "here is how I approach the problem, and how far I take it."
 
 ## Why
 
-The practice this platform replaces is **process-mature but tooling-light** — real discipline (strong tagging, true chargeback, a shared APM ID across cost/security/GRC, an independent top-quartile maturity rating), running on a monthly-batch, SQL-Server-and-PowerShell pipeline that can recommend but not act. A 2-person team runs the whole practice, and the lead loses roughly half their time to operational drag — stakeholder follow-ups, commitment planning, PO handling — that a governed platform can absorb instead of a person. "Governed" isn't a hedge word here: every delegated action, whether proposed by a model or a person, is executed by the same Orchestrator and classified by the same Guardrail Engine a human already trusts — the team gets time back *because* the harness makes delegation safe, not because the agent is simply trusted more.
+The practice this platform modernizes is **process-mature but light on tooling**. It has real discipline (strong tagging, true chargeback, an APM ID shared across cost, security, and GRC, and a top-quartile maturity rating from Microsoft) running on a monthly SQL Server and PowerShell pipeline that can recommend but not act. A small central team runs it, and the lead spends roughly half their time on operational work (stakeholder follow-ups, commitment planning, PO handling) that a governed platform could take on.
 
-Nothing here is framed as a fix for something broken. Every phase is an *addition* to a foundation that already works, aimed at the tier most enterprises — even mature ones — haven't reached yet.
+"Governed" is doing real work in that sentence. Every delegated action, whether a model or a person proposes it, is classified by the same Guardrail Engine and executed by the same Orchestrator. The team gets time back because the harness makes delegation safe, not because the agent is trusted more.
 
-## The solution, at a glance
+Nothing here fixes something broken. Every phase adds to a foundation that already works.
 
-Five phases, each building on the governance and data foundation the ones before it establish:
+## The solution at a glance
 
-| Phase | What it is | Why it's sequenced there |
+Five phases, each built on the data and governance foundation of the phases before it:
+
+| Phase | What it is | Why it comes there |
 |---|---|---|
-| **1 — Data Platform Foundation** | A governed Snowflake platform: mediation, semantic layer, knowledge graph, catalog, data quality | Every later phase reads from this layer — build it once, correctly, first |
-| **2 — Core Intelligence & Self-Serve Foundations** | ML-driven anomaly/rightsizing/RI-SP models, a REST API, and dashboards | First user-facing value, and the source of what Phase 3 automates — simple, deterministic surfaces before anything agentic |
-| **3 — Governed Automation** | A risk-tiered action layer split into two deliberately separate components: an **Orchestrator** (Temporal) running the durable workflow — sequencing, opt-out timers, approval waits, retries, rollback — and a **Guardrail Engine** (OPA policy-as-code) the Orchestrator calls out to for every LOW/MEDIUM/HIGH risk classification. Plus a signed horizontal/vertical contract and a disposition-SLA escalation path | Proven against one proposal source (Core Intelligence) before a second one is added |
-| **4 — Financial Process Automation** | Exception-based bill verification — confidence-scored, evidence-attached reconciliation | A different domain (financial, not infrastructure) sharing the same routing pattern, sequenced once the core platform is stable |
-| **5 — Cloud Workbench** | A bounded, explicitly-graphed conversational **agent** (pydantic-graph, not an open-ended autonomous loop) over the same governed data — retrieves, answers, cites sources, and can self-initiate a governed action, never executes one itself — plus push/pull/what-if expansion and GenAI-assisted PO drafting | Deliberately last — the most complex, least predictable layer, built once the foundation under it is proven |
+| **1: Data Platform Foundation** | A governed Snowflake platform on open Iceberg tables: mediation, cost basis, semantic layer, ontology, catalog, data quality | Every later phase reads from it, so it is built first |
+| **2: Core Intelligence & Self-Serve Foundations** | Anomaly detection, rightsizing rules, an RI/SP planner, a REST API, and dashboards | First user-facing value, and the source of what Phase 3 automates; simple, deterministic surfaces before anything agentic |
+| **3: Governed Automation** | A risk-tiered action layer with two separate components: an **Orchestrator** (Temporal) for the durable workflow and a **Guardrail Engine** (OPA) for risk classification and guardrails (dry-run, kill switch, caps, circuit breaker). Plus a signed horizontal/vertical contract and disposition-SLA escalation | Proven against one proposal source (Core Intelligence) before a second is added |
+| **4: Financial Process Automation** | Exception-based bill verification of provider invoice lines, starting on rules and moving to a model once labels exist | A different domain (financial) using the same routing pattern |
+| **5: Cloud Workbench** | A bounded conversational **agent** over the same governed data that retrieves, answers, cites sources, and can propose a governed action, plus push/pull/what-if expansion and GenAI-assisted PO drafting | Last, because it is the most complex and least predictable layer; a read-only pilot for the FinOps team runs earlier |
 
-Phases 2, 3, and 5 aren't three independent systems that happen to sit next to each other — every proposed action, whether it originates from Core Intelligence's models or Cloud Workbench's agent, enters through the identical `propose_action` tool call and passes through the same Orchestrator/Guardrail Engine pair. That shared entry point is what makes it one **agentic and automation harness**, not three: orchestration (workflow execution and state) and policy enforcement (risk classification) are separated on purpose, so neither the proposing agent nor the workflow engine is ever the thing deciding whether an action is safe to run.
+Phases 2, 3, and 5 form one **agentic and automation harness**, not three systems side by side. Every proposed action, from Core Intelligence's models, Cloud Workbench's agent, or a what-if scenario, enters through the same `propose_action` call and passes through the same Orchestrator and Guardrail Engine. Workflow execution and risk policy are separated on purpose, so neither the proposing agent nor the workflow engine decides whether an action is safe.
 
-Full detail, diagrams, and the master architecture decision log: [`FinOps Solution Overview.md`](docs/FinOps%20Solution%20Overview.md).
+For the short version, read [`FinOps Architecture Brief.md`](docs/FinOps%20Architecture%20Brief.md). For full detail, diagrams, and the master decision log, read [`FinOps Solution Overview.md`](docs/FinOps%20Solution%20Overview.md).
 
-## So what — the value
+## The value
 
-No dollar-value ROI is claimed here — that number belongs to whoever has the organization's actual cost data, and inventing one would be worse than not having it. What *is* defensible from the outside:
+No dollar ROI is claimed. That number belongs to whoever has the organization's cost data, and inventing one would be worse than having none. What can be defended from the outside:
 
-**Time, not dollars.** The 2-person team's lead currently loses ~50% of their time to three operational-drag items, each of which maps directly onto a phase above:
+**Time, not dollars.** The team lead loses about half their time to three kinds of operational work. The rollout is ordered to relieve them early, not in architecture order:
 
-- Reactive stakeholder follow-ups → **Cloud Workbench** (Phase 5), whose entire purpose is deflecting that Q&A load
-- RI/commitment planning → **Core Intelligence**'s coverage/utilization metrics (Phase 2), already designed
-- PO handling → **Bill Verification + PO Auto-Draft** (Phases 4–5), which remove the re-keying step entirely, not just speed it up
+- **Stakeholder follow-ups**: a per-vertical "why did my bill change" report in the first reporting wave (no AI needed), then a read-only Cloud Workbench pilot for the FinOps team, then Cloud Workbench for verticals.
+- **Commitment planning**: a commitment coverage and expiry view in the first reporting wave, then a forecast-then-optimize RI/SP planner once historical data is loaded.
+- **PO handling**: Bill Verification's rules-based review queue before any ML, then PO Auto-Draft, which removes re-keying.
 
-The honest pitch is "same 2-person team, less time lost to toil, more time for the analysis only they can do" — not a dollar figure. And the platform is built to measure its own value going forward: every input a future ROI calculation would need (anomaly dollar impact, recommendation realization rate, RI/SP coverage) is a metric Phase 1–2 already computes into the semantic layer. Pre-launch, that's a formula. Post-launch, it's real numbers.
+That toil is measured before anything changes, so each wave's effect can be shown. The platform also measures its own value afterward: the inputs to a future ROI calculation (anomaly dollar impact, recommendation realization rate, commitment coverage) are metrics the semantic layer already computes.
 
-None of that time-back is real unless the automation earning it is trustworthy — which is what the Orchestrator/Guardrail Engine harness is actually for. A recommendation that only ever sits in a queue doesn't save anyone's time; an action that executes itself without a human-auditable risk classification isn't something a FinOps lead should trust with production infrastructure. Splitting workflow execution (Orchestrator) from risk policy (Guardrail Engine) is what lets LOW-tier actions run unattended while HIGH-tier actions still always wait on a human — the same harness, two different outcomes, decided by policy, not by which component happened to run first.
+None of that time comes back unless the automation is trustworthy, which is what the Orchestrator and Guardrail Engine are for. A recommendation that sits in a queue saves nobody time, and an action that runs without an auditable risk classification isn't something a FinOps lead should trust with production. Separating workflow from policy is what lets LOW-tier actions run unattended while HIGH-tier actions always wait for a person: the same harness, with the outcome set by policy.
+
+**Built to be run by one engineer, and to outlast them.** The team lead, who also built today's pipeline, retires in the end of the year, and the role this repository responds to is a single principal engineer. So the design covers the full modern stack (data platform, ML, self-serve APIs, ontology and graph, agents) while keeping what that engineer operates small: managed services instead of self-hosted ones, three containers on the organization's existing container platform, no clusters or self-hosted databases, and each technology introduced only when first needed. Capturing the lead's business rules as tests before December is the first step of the migration plan. The operational work doesn't retire with the lead; it lands on whoever remains, which makes moving it into the platform more urgent. See the Operating Model in [`FinOps Solution Overview.md`](docs/FinOps%20Solution%20Overview.md).
 
 ## How to read this
 
-Recommended order, each building on the last:
-
-1. [`FinOps Current State.md`](docs/FinOps%20Current%20State.md) — where the practice is today, and how confident to be in that picture
-2. [`FinOps Opportunities.md`](docs/FinOps%20Opportunities.md) — what a modern platform adds on top of it
-3. [`FinOps Solution Overview.md`](docs/FinOps%20Solution%20Overview.md) — the five-phase target state, master architecture, and every sub-document indexed
-4. The **Solution Architecture** sub-documents (linked from the Overview's Sub-Document Index) — one per phase or phase extension
-5. [`Platform_Build_Specification.md`](docs/Platform_Build_Specification.md) — table names, job names, function signatures, policy names, at build-ready specificity for every phase
+1. [`FinOps Architecture Brief.md`](docs/FinOps%20Architecture%20Brief.md): the whole design in a few pages.
+2. [`FinOps Current State.md`](docs/FinOps%20Current%20State.md): where the practice is today, and how confident to be in that picture.
+3. [`FinOps Opportunities.md`](docs/FinOps%20Opportunities.md): what a modern platform adds.
+4. [`FinOps Solution Overview.md`](docs/FinOps%20Solution%20Overview.md): phases, architecture, operating model, test strategy, rollout waves, master ADRs, and the index of sub-documents.
+5. The **Solution Architecture** sub-documents, one per phase or extension (linked from the Overview's Sub-Document Index).
+6. [`Platform_Build_Specification.md`](docs/Platform_Build_Specification.md): table names, job names, function signatures, and policy names for every phase.
+7. [`References.md`](docs/References.md): vendor documentation behind decision-driving claims, and what couldn't be confirmed.
 
 ## Repository structure
 
 ```
 docs/
-├── FinOps Current State.md                                    Where the practice is today
-├── FinOps Opportunities.md                                     What a modern platform adds
-├── FinOps Solution Overview.md                                 Master doc — phasing, diagrams, ADRs, full index
-├── Solution_Architecture_Data_Foundations.md               Phase 1 — data platform
-├── Solution_Architecture_MLOps_Pipeline.md                 Phase 2 — Core Intelligence (ML)
-├── Solution_Architecture_Self_Serve_Foundations.md         Phase 2 — REST API + dashboards
-├── Solution_Architecture_Governed_Automation.md            Phase 3 — Orchestrator (Temporal) + Guardrail Engine (OPA)
-├── Solution_Architecture_Governed_Automation_Contract.md   Phase 3 ext. — the horizontal/vertical contract
-├── Solution_Architecture_Bill_Verification.md              Phase 4 — exception-based bill verification
-├── Solution_Architecture_Cloud_Workbench.md                Phase 5 — conversational agent (pydantic-graph orchestration)
-├── Solution_Architecture_Cloud_Workbench_Expansion.md      Phase 5 ext. — push/pull/what-if channels
-├── Solution_Architecture_PO_Auto_Draft.md                  Phase 5 ext. — reuses the same agent stack for PO drafting
-└── Platform_Build_Specification.md                        Build-ready detail for every phase above
+├── FinOps Architecture Brief.md                                 Short version for reviewers
+├── FinOps Current State.md                                      Where the practice is today
+├── FinOps Opportunities.md                                      What a modern platform adds
+├── FinOps Solution Overview.md                                  Master doc: phases, operating model, tests, rollout, ADRs, index
+├── Solution_Architecture_Data_Foundations.md               Phase 1: data platform
+├── Solution_Architecture_MLOps_Pipeline.md                 Phase 2: Core Intelligence (ML)
+├── Solution_Architecture_Self_Serve_Foundations.md         Phase 2: REST API and dashboards
+├── Solution_Architecture_Governed_Automation.md            Phase 3: Orchestrator (Temporal) and Guardrail Engine (OPA)
+├── Solution_Architecture_Governed_Automation_Contract.md   Phase 3 extension: the horizontal/vertical contract
+├── Solution_Architecture_Bill_Verification.md              Phase 4: exception-based bill verification
+├── Solution_Architecture_Cloud_Workbench.md                Phase 5: conversational agent (pydantic-graph)
+├── Solution_Architecture_Cloud_Workbench_Expansion.md      Phase 5 extension: push/pull and what-if channels
+├── Solution_Architecture_PO_Auto_Draft.md                  Phase 5 extension: PO drafting on the same agent stack
+├── Platform_Build_Specification.md                         Build-ready detail for every phase
+├── References.md                                                Vendor documentation behind key claims
+└── Systems Engineer Prin.md                                     The job posting this responds to
 ```
 
-## Methodology & honest limitations
+## Methodology & limitations
 
-Every document in this set states its own confidence level and flags assumptions as assumptions — see `FinOps Current State.md`'s own Methodology & Confidence section for the full treatment, which applies to everything built on top of it. In short: nothing here is verified against real the organization systems, ownership, or data; every "Open Items to Validate" section is a deliberate, honest list of what a real engagement would need to confirm first, not a gap to be embarrassed about.
+Every document states its confidence and labels assumptions as assumptions. The Methodology & Confidence section of `FinOps Current State.md` covers this in full, and it applies to everything built on it. In short: nothing here is verified against the organization's systems, ownership, or data. Each "Open Items to Validate" list is what a real engagement would confirm first.
 
 ## Status
 
-All five phases have a complete solution architecture, all four originally-scoped sub-documents are written, and the Build Specification covers every phase at build-ready detail. A migration/cutover sequence and communications plan exist end to end. What's deliberately not here: real stakeholder validation of any inferred fact, a build timeline/staffing plan, and a test/QA strategy beyond what each phase's own eval gates and data-quality checks cover — see `FinOps Solution Overview.md`'s Open Items to Validate for the current, honest list.
+All five phases have a solution architecture, and the Build Specification covers every phase. The Solution Overview includes an operating model, a wave-based migration plan, and a communications plan. Not included on purpose: stakeholder validation of any inferred fact; numbers for sizing, platform cost, on-call, and staffing (these need the organization's data, and the Overview's Implementation Prerequisites section lists each one, its inputs, and how it would be produced); and a detailed test plan (the Overview's Test Strategy sets direction only). The Overview's Open Items to Validate has the current list.

@@ -1,45 +1,53 @@
 # Solution Architecture: Governed Automation
 
-Phase 3 of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md). Split out from what was originally a single combined "Internal Assistant" solution architecture document — see [Solution_Architecture_Data_Foundations.md](Solution_Architecture_Data_Foundations.md) for why it was split.
+Phase 3 of the platform sequenced in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md).
 
-Requirements, org details, and specific tool choices below are **inferred** from JD language and reasonable enterprise-FinOps practice, not confirmed the organization fact. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §6.
+Requirements, org details, and tool choices below are **inferred** from the job description and common enterprise FinOps practice. They are not confirmed the organization facts. Companion: [Platform_Build_Specification.md](Platform_Build_Specification.md) §6.
 
-**A naming note.** "Governed Automation" is this document's phase name, matching the rest of this document set's phase-titled documents. What it designs is two distinct components, not one merged engine, each with its own name for when it needs to be referred to on its own: the **Orchestrator** (Temporal) runs the durable workflow every proposed action becomes — sequencing, timers, signals, retries, rollback — and decides nothing about risk itself; the **Guardrail Engine** (OPA) is the policy-decision point the Orchestrator calls out to for a LOW/MEDIUM/HIGH classification before proceeding. The Guardrail Engine's name is deliberately drawn from `FinOps Opportunities.md` §2c's own "Guardrails" framing (dry-run, canary, caps, audit trail, kill switch), since that's exactly what this system implements — not a new concept, just the existing one given a name. Off-the-shelf technology (Temporal, OPA, Postgres) keeps its own real name throughout this document, consistent with how Neo4j, Redis, and Snowflake are treated elsewhere in this document set — only the bespoke policy/workflow design this document produces gets a custom name.
+**A naming note.** "Governed Automation" is the phase name. It designs two separate components, each with its own name:
+
+1. **Orchestrator** (Temporal): runs the durable workflow each proposed action becomes (sequencing, timers, signals, retries, rollback). It decides nothing about risk.
+2. **Guardrail Engine** (OPA): the policy-decision point the Orchestrator asks for a LOW/MEDIUM/HIGH classification, and the enforcer of the operational guardrails in §3.6. The name comes from the "Guardrails" in `FinOps Opportunities.md` §2c, which this component implements.
+
+Off-the-shelf products (Temporal, OPA, Postgres) keep their product names. Only the workflow and policy design produced here gets a custom name.
 
 ---
 
 ## 1. Executive Summary
 
-This is the layer — its two components together, the **Orchestrator** and the **Guardrail Engine** — that decides what happens to an optimization action proposed by Core Intelligence (a rightsizing/anomaly finding) or, later, Cloud Workbench (a user-initiated request): execute it automatically, execute it with a delay and opt-out, or hold it for mandatory human approval — classified by risk, enforced in code, never left to the proposing system's own judgment. It is an **umbrella over every proposal source**, not a step in any one source's pipeline: Core Intelligence and Cloud Workbench (and anything added later) are clients that call into the Orchestrator through one shared entry point, never each other, and never the Guardrail Engine directly. At this phase, Core Intelligence and the Self-Serve Foundations API (`propose_action`'s `origin: "core_intelligence"` and internal-team API calls) are this layer's only proposal sources — Cloud Workbench doesn't exist yet (it's Phase 5, sequenced *after* this layer, per [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md#master-level-architecture-decisions)'s ADR-M1) and becomes a third source once it ships, through the same `propose_action` entry point, no design change required here.
+The Orchestrator and Guardrail Engine together decide what happens to an optimization action proposed by Core Intelligence (a rightsizing or anomaly finding) or, later, by Cloud Workbench (a user request). The action is executed automatically, executed after a delay with an opt-out, or held for mandatory human approval. That decision is based on risk, enforced in code, and never left to the proposing system.
+
+This layer sits over every proposal source; it isn't a step inside any one of them. Core Intelligence, the Self-Serve API, Cloud Workbench, and the what-if workbench all call the Orchestrator through one entry point, `propose_action`. They never call each other or the Guardrail Engine directly. When this phase ships, the only proposal sources are Core Intelligence (`origin: "core_intelligence"`) and the Self-Serve API (`origin: "self_serve_api"`). Cloud Workbench arrives in Phase 5 (ADR-M1 in [FinOps Solution Overview.md](FinOps%20Solution%20Overview.md#master-level-architecture-decisions)) and uses the same entry point with no design change here.
 
 ## 2. Business Context & Requirements
 
 ### 2.1 Problem statement (inferred)
 
-Cloud Platform Services can already generate rightsizing and anomaly recommendations (Core Intelligence, Phase 2) and expose them via a governed API and dashboards (Self-Serve Foundations, Phase 2), but today those recommendations are advisory-only — a human has to act on every one manually, regardless of how low-risk it is. This layer lets a bounded, genuinely low-risk subset execute automatically, freeing human review for the cases that actually need it, without removing human judgment from anything higher-risk. It's deliberately built and proven against Core Intelligence's proposals first, before Cloud Workbench (Phase 5) adds a second, user-initiated proposal source on top of an already-mature layer.
+Core Intelligence (Phase 2) produces rightsizing and anomaly recommendations, and Self-Serve Foundations (Phase 2) exposes them through an API and dashboards. They are advisory: someone has to act on each one by hand, however low the risk. This layer lets a bounded, low-risk subset execute automatically, so human review goes to the cases that need it, and keeps human judgment on everything higher-risk. It is proven against Core Intelligence's proposals first, before Cloud Workbench (Phase 5) adds user-initiated proposals.
 
 ### 2.2 Functional requirements (inferred)
 
-- FR1: Classify a proposed action into LOW/MEDIUM/HIGH risk based on action type, target-resource classification (e.g., production tag), and blast radius.
-- FR2: Enforce routing by that classification in code — HIGH always requires human approval, regardless of any other factor (hard rule, not a scored threshold).
-- FR3: Require an explicit, opt-in agreement between the owning application team and the platform team — keyed on the APM ID — before automation acts on that team's resources **at any tier, including LOW**. Absent a signed agreement, every proposed action for that team defaults to fully advisory, regardless of computed risk tier.
-- FR4: Provide a full audit trail (before/after state) for every automated action, linked to both the resource's APM ID and the agreement that authorized it.
-- FR5: Detect and handle execution failures from IDP/CMP — alert the owning application team and the platform team (Teams channel + ITSM ticket/page, Data Foundations §4.5's shared alerting channels), and where the action was destructive and a pre-action snapshot exists (per the Reversibility NFR below), trigger rollback from it rather than leaving the resource in an unknown intermediate state.
-- FR6: Before calling IDP/CMP directly, check whether the target resource is IaC-managed (Terraform, Data Foundations §4.1). If it is, route execution through the IaC pipeline (a PR against the Terraform module, or a triggered Terraform Cloud/Enterprise run) instead of a direct API call — a direct call to a Terraform-managed resource risks being silently reverted, or conflicting, on the next `terraform apply`.
+- FR1: Classify a proposed action as LOW, MEDIUM, or HIGH risk based on action type, target classification (for example, a production tag), and blast radius.
+- FR2: Enforce routing by that classification in code. HIGH always requires human approval, whatever else is true. This is a fixed rule, not a scored threshold.
+- FR3: Require an explicit, opt-in agreement between the owning application team and the platform team, keyed on the APM ID, before automation acts on that team's resources **at any tier, including LOW**. Without a signed agreement, every proposed action for that team is advisory, whatever its risk tier.
+- FR4: Keep a full audit trail (before and after state) for every automated action, linked to the resource's APM ID and the agreement that authorized it.
+- FR5: Detect execution failures from IDP and CMP. Alert the owning team and the platform team (Teams channel plus ITSM ticket or page, Data Foundations §4.5). If the action was destructive and a pre-action snapshot exists (the Reversibility NFR below), roll back from it instead of leaving the resource in an unknown state.
+- FR6: Before calling IDP or CMP, check whether the target resource is managed by Terraform (Data Foundations §4.1). If it is, execute through the IaC pipeline (a PR against the Terraform module, or a Terraform Cloud/Enterprise run) instead. A direct change to a Terraform-managed resource can be reverted, or conflict, on the next `terraform apply`.
+- FR7: Enforce operational guardrails regardless of risk tier: a dry-run mode every contract starts in, a kill switch at global, vertical, and application scope, per-scope daily caps, a circuit breaker that turns on the kill switch after repeated failures or rollbacks, and resource-level exclusions (§3.6).
 
 ### 2.3 Non-functional requirements (inferred)
 
 | Requirement | Target (inferred) | Rationale |
 |---|---|---|
 | Approval latency (MEDIUM/HIGH tier) | Queued for human review, no fixed SLA assumed | Human review time isn't the platform's to promise |
-| Reversibility | A snapshot/backup step required before any destructive action where one is available | Bounds the cost of an incorrect automated action |
+| Reversibility | A snapshot or backup step before any destructive action where one is available | Limits the cost of a wrong automated action |
 | Auditability | Every action logged with before/after state, risk tier, and authorizing agreement | Same HITRUST/SOC2-equivalent posture as the rest of the platform |
-| Failure alerting | Every IDP/CMP execution failure surfaced to the owning team and platform team, no fixed response-time SLA assumed | Silent failure on an approved action is worse than the action never having been approved — someone has to know |
+| Failure alerting | Every IDP/CMP execution failure reported to the owning team and platform team, no fixed response-time SLA assumed | A silent failure on an approved action is worse than no action; someone has to know |
 
 ### 2.4 Non-goals (inferred)
 
-- Not a general-purpose infrastructure automation platform; scope is cost-optimization actions surfaced by Core Intelligence or Self-Serve Foundations.
-- Not a replacement for IDP/CMP's own provisioning logic — this layer decides *whether* an action proceeds, IDP/CMP still execute it.
+- Not a general infrastructure automation platform. Scope is cost-optimization actions.
+- Not a replacement for IDP's or CMP's provisioning logic. This layer decides *whether* an action proceeds; IDP and CMP still execute it.
 
 ---
 
@@ -50,11 +58,13 @@ flowchart TD
     CI["Core Intelligence<br/>finding"] -->|propose_action, single entry point| P[Proposed action]
     CW["Cloud Workbench<br/>node_route_action<br/>Phase 5, added later"] -->|propose_action, single entry point| P
 
-    subgraph WF["Orchestrator (Temporal) — one workflow instance per proposed action"]
-        P --> CHECK{"check_contract_exists?<br/>(Activity, §3.4 / Contract doc)"}
-        CHECK -->|no| ADV["Fully advisory — no automation"]
+    subgraph WF["Orchestrator (Temporal): one workflow instance per proposed action"]
+        P --> K0{"check_automation_enabled<br/>(Activity, §3.6)"}
+        K0 -->|off| HALT0["Halted, advisory"]
+        K0 -->|on| CHECK{"check_contract_exists?<br/>(Activity, §3.4 / Contract doc)"}
+        CHECK -->|no| ADV["Fully advisory, no automation"]
         CHECK -->|yes| R
-        subgraph GUARD["Guardrail Engine (OPA) — policy decision"]
+        subgraph GUARD["Guardrail Engine (OPA): policy decision"]
             R["classify_action_risk (Activity)<br/>OPA policy rules"]
         end
         R -->|LOW| AUTO[Automatic execution<br/>+ notification]
@@ -66,7 +76,10 @@ flowchart TD
         HUMAN -->|rejected signal| CANCEL
     end
 
-    AUTO --> IAC{"managed_by_iac?<br/>(Activity, Data Foundations §4.1)"}
+    AUTO --> GATE{"check_automation_enabled again<br/>and execution_mode (§3.6)"}
+    GATE -->|kill switch on| HALT["Halted, notify"]
+    GATE -->|dry_run| DRY["Record would-execute,<br/>no change made"]
+    GATE -->|live| IAC{"managed_by_iac?<br/>(Activity, Data Foundations §4.1)"}
     IAC -->|no| IDP["IDP<br/>existing"]
     IAC -->|no| CMP["CMP<br/>existing"]
     IAC -->|yes| TFPIPE["Route through IaC pipeline<br/>(PR or Terraform Cloud run)"]
@@ -75,100 +88,120 @@ flowchart TD
     FAIL -->|if destructive + snapshot exists| ROLLBACK["Trigger rollback from snapshot<br/>(Activity)"]
 ```
 
-IDP and CMP are the organization's real, existing provisioning and container-management platforms — this layer decides whether an action proceeds and calls them to execute it, it doesn't replace or rebuild either one. A failed execution is not a silent dead end: it alerts both parties and, where reversible, triggers rollback rather than leaving the resource in an unknown state (FR5). §3.1–3.3 below explain the stack, the determinism guarantee, and what actually runs this workflow — the diagram shows the shape, not the mechanics.
+IDP and CMP are the organization's existing provisioning and container-management platforms. This layer decides whether an action proceeds and calls them to execute it; it doesn't replace either. A failed execution alerts both teams and, where possible, rolls back (FR5). §3.1–3.3 explain the stack, the determinism boundary, and how the workflow runs.
 
 ### 3.1 Technology stack
 
 | Component | Choice | Rationale |
 |---|---|---|
-| Orchestration | **Temporal** (self-hosted on AKS) | Durable execution for multi-hour/day opt-out windows, indefinite human-approval waits, and reliable retry/compensation on IDP/CMP failure — a plain request/response service can't express this without reinventing a workflow engine. See ADR-002 and §3.3. |
-| Risk classification | Deterministic code, policy rules evaluated via **Open Policy Agent (OPA)** | Pure rule evaluation (action type, target classification, blast radius) — no ML model or LLM anywhere in this path. See ADR-001. |
-| Approval queue / workflow operational state | **Postgres** | A transactional read-modify-write workload (create, list-pending, approve/reject) that Snowflake's analytical compute isn't built for. See ADR-003. |
-| Audit trail (reporting copy) | Snowflake gold (`gold.fact_action_audit`) | Finalized records synced from Postgres/Temporal history, queryable alongside every other fact table for cross-platform reporting. |
-| Execution targets | IDP, CMP (existing, called via MCP tools) | This layer decides whether to call them; they still do the actual provisioning/container work. |
-| Infrastructure | AKS, Terraform | Same shared platform infrastructure as every other phase (Data Foundations §4.5). |
+| Orchestration | **Temporal Cloud** (managed), with workflow workers running as one container on CMP | Durable execution for opt-out windows lasting hours or days, open-ended approval waits, and reliable retry and compensation when IDP or CMP fail. A request/response service would have to reinvent a workflow engine to do this. See ADR-002 and §3.3 |
+| Risk classification | Deterministic code, with policy rules evaluated by **Open Policy Agent (OPA)** | Rule evaluation only (action type, target classification, blast radius); no ML model or LLM in this path. OPA runs as a sidecar next to the workflow workers, its only caller. Policies are a versioned bundle with their own unit tests. See ADR-001 and ADR-005 |
+| Approval queue / workflow operational state | **Postgres** (managed: Azure Database for PostgreSQL, shared by the whole platform) | A transactional read-modify-write workload (create, list pending, approve or reject) that Snowflake isn't built for. See ADR-003 |
+| Audit trail (reporting copy) | Snowflake gold (`gold.fact_action_audit`) | Final records synced from Postgres and Temporal history, queryable with every other fact table |
+| Execution targets | IDP, CMP (existing, called through MCP tools) | This layer decides whether to call them; they do the provisioning and container work |
+| Infrastructure | CMP, Terraform | the organization's existing container platform, run by its platform team; no platform-owned cluster (Build Specification §8) |
 
 ### 3.2 Determinism boundary: what the agent decides vs. what this layer decides
 
-This layer is deterministic end to end — no ML model or LLM has any influence on classification, routing, or execution. Core Intelligence and Cloud Workbench share exactly one entry point into it: the MCP tool `propose_action(action_type, target, params, origin) -> ProposalResult`. Neither ever calls IDP or CMP directly, computes a risk tier, or touches the approval queue — `idp_provision_request` and `cmp_container_action` (Build Specification §6) are internal execution tools, invoked only by this layer's own workflow (§3.3), never exposed to either proposing system.
+This layer is deterministic end to end. No ML model or LLM influences classification, routing, or execution. Every proposal source uses one entry point: the MCP tool `propose_action(action_type, target, params, origin) -> ProposalResult`. No source calls IDP or CMP, computes a risk tier, or touches the approval queue. `idp_provision_request` and `cmp_container_action` (Build Specification §6) are internal tools that only this layer's workflow calls (§3.3).
 
-Concretely, for Cloud Workbench: a user's natural-language request ("resize this instance") isn't itself an action — it becomes one only when the pydantic-graph agent's `node_route_action` (Build Specification §5) calls `propose_action`. However the LLM reasoned about the request, the resulting proposal is classified and routed exactly like a Core Intelligence finding — §3.3's classification logic has no branch that reads "who proposed this" as anything but an audit field. This is ADR-001's "enforced in code... outside the proposing system's own reasoning" made concrete as a call-flow rather than a stated principle. The agent's role ends at proposing and later relaying the outcome (`ProposalResult`: queued, executed, denied) back to the user — it has no path to influence the tier or bypass the workflow.
+For Cloud Workbench, a user's request ("resize this instance") isn't an action. It becomes one only when the pydantic-graph agent's `node_route_action` (Build Specification §5) calls `propose_action`. However the LLM reasoned, the proposal is classified and routed like a Core Intelligence finding; classification never branches on who proposed it, which is recorded for audit only. This is how ADR-001's principle is enforced in the call flow. The agent proposes and then reports the outcome (`ProposalResult`: queued, executed, denied) back to the user. It has no way to change the tier or skip the workflow.
 
 ### 3.3 Orchestration: a durable workflow per proposed action
 
-Three things about this layer's job don't fit a plain request/response service: MEDIUM tier's opt-out window can span hours to days; HIGH tier's approval wait is indefinite and asynchronous; and a failed IDP/CMP call (FR5) needs reliable retry and a conditional compensating rollback — all while keeping a complete state history for FR4's audit trail. That's a durable-workflow problem; reassembling it from a status column and a polling cron job tends to quietly become an ad hoc workflow engine anyway, minus the guarantees a real one provides.
+Three parts of this job don't fit a request/response service. MEDIUM tier's opt-out window can last hours or days. HIGH tier's approval wait has no end date. A failed IDP or CMP call (FR5) needs reliable retry and a conditional rollback. All of it needs a complete state history for FR4's audit trail. That is a durable-workflow problem. Building it from a status column and a polling cron job produces an informal workflow engine without the guarantees of a real one.
 
-**Each proposed action is one Temporal workflow instance**, running the following as durable steps:
+**Each proposed action is one Temporal workflow instance**, with these durable steps:
 
-1. `check_contract_exists` (an Activity, [Solution_Architecture_Governed_Automation_Contract.md](Solution_Architecture_Governed_Automation_Contract.md)) looks up an active contract for the proposal's APM ID. None found → fully advisory, workflow ends here; a human handles it manually. Found → proceeds to step 2.
-2. `classify_action_risk` (an Activity — pure, deterministic code) evaluates the proposal against OPA policy rules and any contract-requested tier upgrade (Contract doc §2.2 FR3 — a contract can request stricter handling than the default, never looser), returning a `RiskTier`.
-3. Branch on tier: **LOW** proceeds straight to execution. **MEDIUM** starts a durable Timer for the opt-out window; an owning-team opt-out arrives as a Signal that cancels the workflow before execution, otherwise the timer firing triggers it. **HIGH** blocks on a Signal from the Postgres-backed approval queue (§3.1) — no timeout, since human review time isn't this platform's to promise (§2.3's Approval latency NFR).
-4. Before executing, `check_iac_managed` (an Activity) checks whether the target resource is Terraform-managed (Data Foundations §4.1, FR6). If yes, execution routes through the IaC pipeline (`open_terraform_pr` or `trigger_terraform_run`, Build Specification §6) instead of IDP/CMP — a direct call would just be reverted or conflict on the next `terraform apply`. If no, `execute_action` calls IDP or CMP via their MCP tools as before. Temporal's built-in retry policy attempts a bounded number of retries before treating either path's failure as genuine (FR5): an `alert_teams` Activity notifies the owning and platform teams, and, where the action was destructive and a pre-action snapshot exists, a `rollback` Activity runs.
-5. Every state transition (contract checked, classified, queued, approved/denied, executing, succeeded, failed, rolled back) is part of Temporal's own workflow history, a natural fit for FR4 — though a queryable copy is still written to Snowflake gold (§3.1, ADR-003) since workflow history isn't meant to be queried like a reporting table.
+1. `check_automation_enabled` (an Activity, §3.6) checks the kill switch at global, vertical, and application scope. If any is off, the proposal is recorded as halted and handled as advisory. Otherwise `check_contract_exists` (an Activity, [Solution_Architecture_Governed_Automation_Contract.md](Solution_Architecture_Governed_Automation_Contract.md)) looks up an active contract for the proposal's APM ID. If there is none, the action is advisory and the workflow ends; a person handles it. If there is one, the workflow continues.
+2. `classify_action_risk` (an Activity, deterministic code) evaluates the proposal against the OPA policies and any stricter handling the contract requests (Contract doc §2.2 FR3; a contract can ask for stricter handling, never looser) and returns a `RiskTier`.
+3. Branch on tier. **LOW** goes straight to execution. **MEDIUM** starts a durable Timer for the opt-out window; an opt-out from the owning team arrives as a Signal and cancels the workflow, otherwise the timer firing triggers execution. **HIGH** waits for a Signal from the Postgres approval queue (§3.1), with no timeout (§2.3, Approval latency).
+4. Before executing, `check_automation_enabled` runs again, because the switch may have been turned off during an opt-out window or approval wait. Then the contract's `execution_mode` is read: in `dry_run`, the would-be action is recorded and the workflow ends without changing anything (§3.6). In `live`, `check_iac_managed` (an Activity) checks whether the target is Terraform-managed (Data Foundations §4.1, FR6). If it is, execution goes through the IaC pipeline (`open_terraform_pr` or `trigger_terraform_run`, Build Specification §6), because a direct change would be reverted or conflict on the next `terraform apply`. If not, `execute_action` calls IDP or CMP through their MCP tools. Temporal's retry policy makes a bounded number of attempts before treating a failure as real (FR5). Then `alert_teams` notifies the owning and platform teams, and if the action was destructive and a snapshot exists, a `rollback` Activity (`rollback_from_snapshot`, Build Specification §6) runs.
+5. Every state transition (kill switch checked, contract checked, classified, queued, approved or denied, executing, succeeded, failed, rolled back) is in Temporal's workflow history, which serves FR4. A queryable copy is also written to Snowflake gold (§3.1, ADR-003), since workflow history isn't built for reporting queries.
+
+**Blast radius today and later.** `policy_blast_radius` (Build Specification §6) counts the resources an action touches directly. It can't see what depends on those resources, because no service-dependency data is ingested yet. Once a dependency source exists (a CMDB or service map), dependency-aware blast radius ("what depends on this resource, at any depth") becomes a knowledge graph traversal and one of the triggers for adding a graph database (Data Foundations ADR-004). Until then, the production gate and HIGH tier's mandatory approval cover the risk the direct count misses.
 
 **Risk tiers at a glance:**
 
 | Tier | What triggers it | What happens (once a contract is signed) | Contract required (§3.4)? |
 |---|---|---|---|
-| **LOW** | Low blast-radius action on a non-sensitive target (action type, target classification, blast radius — FR1; the concrete policy rules themselves are OPA policy-as-code, not enumerated in this document) | Executes immediately — no delay, no approval | **Yes, even at LOW** — a lightweight version can suffice, but without any signed agreement the application team's actions default to fully advisory, regardless of tier (FR3) |
-| **MEDIUM** | Elevated blast radius or target sensitivity, not high enough to require mandatory approval | Delayed execution: a durable opt-out window (Timer, hours to days) the owning team can cancel via Signal before it fires; otherwise executes automatically when the timer expires | Yes — a fuller version, given the added risk |
-| **HIGH** | Highest blast radius / most sensitive target — a hard rule, not a scored threshold (FR2) | Never automatic — blocks indefinitely on mandatory human approval (a Signal from the Postgres-backed approval queue, no timeout per §2.3's Approval latency NFR) | Yes — a fuller version, given the added risk |
+| **LOW** | Low blast radius on a non-sensitive target (action type, target classification, blast radius, FR1; the concrete rules live in the OPA policies) | Executes immediately, with no delay or approval | **Yes, even at LOW.** A lightweight version is enough, but without a signed agreement the team's actions are advisory (FR3) |
+| **MEDIUM** | Higher blast radius or target sensitivity, short of mandatory approval | Delayed execution: a durable opt-out window (Timer, hours to days) the owning team can cancel with a Signal; otherwise executes when the timer expires | Yes, a fuller version, given the added risk |
+| **HIGH** | Highest blast radius or most sensitive target. A fixed rule, not a scored threshold (FR2) | Never automatic: waits indefinitely for human approval (a Signal from the Postgres approval queue, no timeout, §2.3) | Yes, a fuller version, given the added risk |
 
-This is what actually backs the diagram above: each arrow is a state transition inside one durable workflow, not a sequence of independent service calls reassembling its own state on every retry.
+Each arrow in the diagram is a state transition inside one durable workflow, not a chain of separate service calls that rebuild their state on every retry.
 
 ### 3.4 The horizontal/vertical "contract"
 
-An explicit, opt-in agreement between the owning application team and the platform team is needed before automation acts on their resources **at any tier, including LOW** — not just above it. Absent a signed agreement, every proposed action for that application team defaults to fully advisory: a human reviews and acts manually, regardless of what `classify_action_risk` would have computed, enforced by `check_contract_exists` (step 1, §3.3) before classification ever runs. The contract is what turns on automation in the first place; risk tier then governs how much autonomy that already-agreed-to automation gets (LOW: immediate execution, MEDIUM: delayed with opt-out, HIGH: mandatory approval even with a contract in place). This is an SLA-like contract, keyed on the APM ID, covering what's pre-approved, notification requirements, change windows, rollback guarantees, and escalation paths — tiered itself (a lightweight version opting into LOW-only automation, versus a fuller version needed before MEDIUM/HIGH-tier autonomy is granted, given those carry materially more risk). **Fully designed in [Solution_Architecture_Governed_Automation_Contract.md](Solution_Architecture_Governed_Automation_Contract.md)** — schema, lifecycle, signing mechanism, and the `check_contract_exists` enforcement point; not restated here.
+The owning application team and the platform team need an explicit, opt-in agreement before automation acts on that team's resources, **at any tier, including LOW**. Without one, every proposed action for that team is advisory: a person reviews and acts manually, whatever `classify_action_risk` would have returned. `check_contract_exists` enforces this before classification runs (step 1, §3.3). The contract turns automation on; the risk tier then sets how much autonomy it gets (LOW: immediate, MEDIUM: delayed with opt-out, HIGH: approval required even with a contract). The contract is SLA-like and keyed on the APM ID. It covers what is pre-approved, notification, change windows, rollback guarantees, and escalation paths, and it comes in two levels: a lightweight version for LOW-only automation, and a fuller version before MEDIUM or HIGH autonomy is granted. **Designed in full in [Solution_Architecture_Governed_Automation_Contract.md](Solution_Architecture_Governed_Automation_Contract.md)**: schema, lifecycle, signing, and the `check_contract_exists` enforcement point.
 
 ### 3.5 Assumptions adopted
 
-Educated assumptions carried over from `FinOps Opportunities.md`'s open items, stated here because they specifically shape this layer's design:
+Assumptions from the open items in `FinOps Opportunities.md` that shape this layer's design:
 
-- **No automated remediation exists today.** Adopted as the baseline this entire layer is designed against — Section 2.1's problem statement assumes a clean slate, not a migration from some existing automation.
-- **APM classification coverage is partial, not complete.** The contract entity's risk-tier field assumes the APM tool already carries *some* classification data (GRC's own compliance work likely requires it), but not a blast-radius-specific field — that's a FinOps/infra concept GRC wouldn't need. The schema extension this contract needs is one net-new field layered onto existing classification, not a from-scratch effort.
-- **A change-management/CAB process exists.** At this organizational scale, assume one does. MEDIUM-tier's "change-window constraints" are designed to consult an existing CAB calendar/freeze schedule, not invent a parallel one — worth confirming which system of record that calendar actually lives in before building against it.
-- **What-if-originated proposals get no special trust.** Whether a proposed action originates from Core Intelligence, Cloud Workbench, or Cloud Workbench Expansion's what-if capability, it is classified and routed through the identical LOW/MEDIUM/HIGH pipeline above — no bypass, no elevated autonomy for a simulation just because a human ran it interactively. This resolves the "would verticals trust a what-if result feeding into automation" question architecturally: nothing exceptional is granted, so there's nothing exceptional to trust.
+- **No automated remediation exists today.** This whole layer is designed against that baseline; §2.1 assumes a clean start, not a migration from existing automation.
+- **APM classification coverage is partial.** The contract's risk-tier field assumes the APM tool carries *some* classification data (GRC's compliance work likely needs it), but not a blast-radius field, which is an infrastructure concept GRC wouldn't need. The contract needs one new field added to existing classification, not a new classification effort.
+- **A change-management/CAB process exists.** At this organization's scale, one almost certainly does. MEDIUM tier's change-window constraints are designed to read an existing CAB calendar or freeze schedule. Confirm which system of record holds it before building against it.
+- **What-if proposals get no special trust.** Whether a proposal comes from Core Intelligence, Cloud Workbench, or Cloud Workbench Expansion's what-if workbench, it goes through the same LOW/MEDIUM/HIGH pipeline. A simulation a person ran interactively gets no bypass and no extra autonomy, so there is no special trust to decide on.
+
+### 3.6 Guardrails: dry-run, kill switch, caps, circuit breaker, exclusions
+
+Risk tiers decide *how much autonomy* a single action gets. These guardrails limit *what automation can do overall* and let a person stop it at once. They implement the guardrails listed in `FinOps Opportunities.md` §2c, and the Orchestrator and Guardrail Engine enforce all of them, never the proposing system.
+
+1. **Dry-run mode.** Every contract has an `execution_mode` of `dry_run` or `live`, and every new contract starts in `dry_run`. In dry-run, the workflow runs every step (contract check, classification, opt-out timer, approval wait), but `execute_action` records what it *would* have done instead of calling IDP, CMP, or the IaC pipeline. A contract moves to `live` only after the owning team and the FinOps team review its dry-run record (default: at least 20 proposals over at least 30 days, with no classification the reviewers disagree with).
+2. **Kill switch.** An `automation_controls` record at global, vertical, or application (APM ID) scope turns automation off for that scope. `check_automation_enabled` runs twice per workflow, at the start and again just before `execute_action`, so a MEDIUM-tier action waiting out its opt-out window still stops if the switch is turned off mid-wait. The FinOps team can change any scope; an application's Owner or Secondary Approver can change their own application. Turning it off stops new executions; it doesn't undo completed ones.
+3. **Caps.** `policy_run_caps` (OPA) denies execution once a scope reaches its rolling 24-hour limit on executed actions or total estimated monthly spend change (illustrative defaults: 10 actions per application, 50 platform-wide). A capped action falls back to advisory; it doesn't fail. Caps are configuration owned by the FinOps team.
+4. **Circuit breaker.** After each execution outcome, `evaluate_circuit_breaker` checks recent failures and rollbacks. If an application has two failed or rolled-back actions in 24 hours, or the platform-wide rollback rate is above 5% over 7 days (illustrative defaults), it turns on the kill switch for that scope with `set_by = 'circuit_breaker'` and alerts the owning team and the FinOps team. Only a person can turn automation back on.
+5. **Exclusions.** An owning team can exclude specific resources (by resource ID or tag) from automation without leaving the program, with a reason and an expiry date, in `automation_exclusions`. Excluded resources are passed to OPA and always classified advisory. Expired exclusions are listed for review.
+
+Every guardrail decision (halted by kill switch, capped, excluded, dry-run) is written to the audit trail with the workflow ID, like any other state transition (FR4).
 
 ---
 
 ## 4. Architecture Decision Records
 
-**ADR-001: Enforce action guardrails in code (blast-radius limits, approval gates) rather than relying on the proposing system's own risk judgment**
-- *Context*: Proposed actions can originate from a classical ML model (Core Intelligence) or an LLM agent (Cloud Workbench), and both can take real actions against infrastructure via IDP/CMP.
-- *Decision*: Risk-tiered autonomy with hard, code-level enforcement — blast-radius limits, reversibility checks, and approval gates that sit outside the proposing system's own reasoning.
-- *Alternatives considered*: Trust the proposing system's own self-assessed confidence/risk classification as the sole gate, rejected — a probabilistic judgment (from either a model or an LLM) is not a safe sole enforcement mechanism for destructive actions.
-- *Consequences*: Some legitimate low-risk actions may occasionally require unnecessary approval (a false positive on risk tiering), an acceptable tradeoff against the cost of an unreviewed destructive action.
+**ADR-001: Enforce action guardrails in code, not through the proposing system's own risk judgment**
+- *Context*: Proposals can come from a classical ML model (Core Intelligence) or an LLM agent (Cloud Workbench), and either could lead to real changes through IDP or CMP.
+- *Decision*: Risk-tiered autonomy with hard enforcement in code: blast-radius limits, reversibility checks, and approval gates outside the proposing system's reasoning.
+- *Alternatives considered*: Using the proposing system's own confidence or risk assessment as the only gate, rejected. A probabilistic judgment, from a model or an LLM, isn't a safe sole control for destructive actions.
+- *Consequences*: Some low-risk actions will occasionally need approval they didn't need (a false positive on tiering). That is an acceptable cost compared with an unreviewed destructive action.
 
-**ADR-002: Orchestrate proposed actions as durable Temporal workflows rather than a stateless request/response service**
-- *Context*: This layer's job spans synchronous classification, potentially multi-day delays (MEDIUM tier), indefinite waits for human approval (HIGH tier), and failure handling with conditional rollback (FR5) — state that has to survive process restarts and be auditable end to end.
-- *Decision*: Model each proposed action as one Temporal workflow (§3.3), with classification, execution, alerting, and rollback as Activities, and the opt-out window/approval wait expressed as Temporal Timers and Signals rather than polling loops or cron-scheduled status checks.
-- *Alternatives considered*: A stateless API plus a status column and a polling cron job to advance it, rejected — this is effectively an ad hoc workflow engine minus the durability, retry, and history guarantees a purpose-built one already provides, and tends to accumulate edge cases (a missed poll cycle, a crash mid-transition) a real engine handles by construction. A cloud-native equivalent (AWS Step Functions, Azure Durable Functions), rejected as the default — viable, but single-cloud-coupled in a way that cuts against this platform's general preference for tools that run the same regardless of which hyperscaler a given workload touches (the same reasoning behind Snowpark ML over a hyperscaler-native ML platform, MLOps Pipeline ADR-004).
-- *Consequences*: One more piece of infrastructure to operate (a Temporal cluster on AKS), in exchange for not hand-building retry, timer, and audit-history logic this layer's requirements already demand.
+**ADR-002: Orchestrate proposed actions as durable Temporal workflows**
+- *Context*: The job spans classification, multi-day delays (MEDIUM), open-ended approval waits (HIGH), and failure handling with rollback (FR5). That state has to survive restarts and be auditable end to end.
+- *Decision*: Model each proposed action as one Temporal workflow (§3.3), with classification, execution, alerting, and rollback as Activities, and the opt-out window and approval wait as Timers and Signals.
+- *Alternatives considered*: A stateless API with a status column and a polling cron job, rejected. It is an informal workflow engine without durability, retry, or history guarantees, and it collects edge cases (a missed poll, a crash mid-transition) that a real engine already handles. A cloud-native equivalent (AWS Step Functions, Azure Durable Functions), rejected as the default. It would work, but it ties the workflow to one cloud, against the platform's preference for tools that behave the same across providers (the same reasoning as MLOps Pipeline ADR-004).
+- *Consequences*: Use **Temporal Cloud**, not a self-hosted cluster. Self-hosting means running the Temporal server services and their persistence database, a large operating load for a platform expected to be run largely by one engineer (Solution Overview, Operating Model). With Temporal Cloud, the platform runs only its workers. The trade-off is a paid external service holding workflow history (action payloads, approval decisions), which needs the same security review as any SaaS handling operational data. Retry, timers, and audit history don't have to be hand-built.
 
-**ADR-003: Store approval-queue and workflow operational state in Postgres, sync finalized records to Snowflake gold for reporting**
-- *Context*: `action_approval_requests` and related workflow state are a transactional read-modify-write workload — create a request, list pending ones, record a decision, update status — the pattern an OLTP database is built for. Snowflake, used everywhere else in this platform (Data Foundations ADR-003), is an analytical/OLAP warehouse, not designed for this access pattern.
-- *Decision*: Keep operational workflow/approval state in Postgres — a standard, well-understood OLTP fit for this read-modify-write pattern — and sync finalized action records into a `gold.fact_action_audit`-style Snowflake table once a workflow completes, for cross-platform reporting alongside every other fact table.
-- *Alternatives considered*: Keep this state in Snowflake directly, rejected — forcing a high-frequency, low-latency, single-row read/write workload onto an analytical warehouse is a real cost-and-latency mismatch, not a hypothetical one.
-- *Consequences*: Two data stores instead of one for this layer, and a sync step to keep them consistent — accepted because it puts each workload on the store actually built for it, following the same "operational store plus a resynced analytical copy" pattern already established for Neo4j (Data Foundations ADR-004).
+**ADR-003: Keep approval-queue and workflow state in Postgres, and sync final records to Snowflake gold**
+- *Context*: `action_approval_requests` and related workflow state are a transactional read-modify-write workload (create a request, list pending, record a decision, update status), which is what an OLTP database is for. Snowflake (Data Foundations ADR-003) is an analytical warehouse.
+- *Decision*: Keep operational workflow and approval state in Postgres, and sync each completed workflow's record into `gold.fact_action_audit` in Snowflake for reporting.
+- *Alternatives considered*: Keeping this state in Snowflake, rejected. Frequent, low-latency single-row reads and writes on an analytical warehouse cost more and run slower.
+- *Consequences*: Two stores for this layer and a sync step between them, the same operational-store-plus-analytical-copy pattern the platform uses elsewhere. One managed Postgres instance serves every phase's operational state, so this is one database for the platform, not one per phase.
 
-**ADR-004: Check IaC-managed status before direct execution; route Terraform-managed resources through the IaC pipeline instead of IDP/CMP**
-- *Context*: `execute_action` calling IDP/CMP directly changes live infrastructure outside of Terraform. If the target resource is Terraform-managed, that live change is invisible to the IaC pipeline — the next `terraform apply` either silently reverts it or conflicts with an unrelated change to the same module. Neither is acceptable for an automated action.
-- *Decision*: `check_iac_managed` runs before `execute_action` (FR6, §3.3). Terraform-managed resources route through the IaC pipeline (a PR against the module, or a triggered Terraform Cloud/Enterprise run); unmanaged resources proceed through IDP/CMP exactly as before.
-- *Alternatives considered*: Always call IDP/CMP directly and rely on drift detection to eventually surface the conflict, rejected — "eventually surfaced" is not the same as "prevented," and this platform already treats a silent failure mode as worse than a blocked action everywhere else (FR5's failure alerting). Route every action through the IaC pipeline regardless of management status, rejected — a genuinely unmanaged resource has no Terraform module to open a PR against, so this would just fail for the majority of today's estate (Data Foundations' assumption that most of today's infrastructure predates any IaC practice).
-- *Consequences*: One more Activity and one more branch per workflow, and the IaC-routed path has its own latency profile (a PR/CI cycle, not an immediate API call) — appropriate given the alternative is fighting the IaC pipeline, not a cost worth avoiding.
+**ADR-004: Check for Terraform management before executing, and route Terraform-managed resources through the IaC pipeline**
+- *Context*: When `execute_action` calls IDP or CMP, it changes live infrastructure outside Terraform. If Terraform manages the target, the next `terraform apply` either reverts the change or conflicts with another change to the same module. Neither is acceptable for automation.
+- *Decision*: `check_iac_managed` runs before `execute_action` (FR6, §3.3). Terraform-managed resources go through the IaC pipeline (a PR against the module, or a Terraform Cloud/Enterprise run); unmanaged resources go through IDP or CMP.
+- *Alternatives considered*: Always calling IDP or CMP and relying on drift detection to catch conflicts later, rejected. Catching a conflict later doesn't prevent it, and the platform treats silent failure as worse than a blocked action (FR5). Routing every action through the IaC pipeline, rejected. An unmanaged resource has no module to open a PR against, and much of today's estate is assumed to predate IaC.
+- *Consequences*: One more Activity and branch per workflow. The IaC path is slower (a PR and CI cycle instead of an API call), which is better than fighting the IaC pipeline.
+
+**ADR-005: Run OPA as a sidecar to the workflow workers, not as a separate service**
+- *Context*: The Guardrail Engine is kept separate from the Orchestrator: policy decides risk, and the workflow acts on the decision (§3.2, ADR-001). That separation is about ownership and testability of the rules, not network topology. The workflow workers are the Guardrail Engine's only caller.
+- *Decision*: Deploy OPA as a sidecar container in the same pod as the Temporal workers (Build Specification §8), loading a versioned policy bundle from the platform repository. `classify_action_risk` calls it over localhost.
+- *Alternatives considered*: A standalone OPA service with its own deployment and scaling, rejected; one more service to deploy, secure, and monitor for a single caller. Writing the rules directly into workflow code, rejected; it would merge policy and orchestration, the separation this layer depends on.
+- *Consequences*: Policy and orchestration still change independently (separate bundle, tests, and review) but deploy together. If another caller needs the same policies, OPA can move to its own service without changing them.
 
 ---
 
 ## 5. Glossary
 
-**Blast radius** — A hard limit on how much an autonomous action can affect, enforced in code.
+**Blast radius**: How much an automated action can affect, limited by rules enforced in code.
 
-**Guardrail Engine** — The policy-decision component (OPA) this document designs: classifies a proposed action into LOW/MEDIUM/HIGH risk (action type, target classification, blast radius), consulted by the Orchestrator, never called directly by a proposing system. Named for `FinOps Opportunities.md` §2c's "Guardrails" framing.
+**Guardrail Engine**: The policy-decision component (OPA) designed here. It classifies proposed actions as LOW, MEDIUM, or HIGH risk (action type, target classification, blast radius) and enforces the §3.6 guardrails. The Orchestrator calls it; proposing systems never do.
 
-**Orchestrator** — The durable-workflow component (Temporal) this document designs: sequencing, the MEDIUM-tier opt-out timer, the HIGH-tier approval wait, retries, and conditional rollback for every proposed action. The single umbrella every proposal source (Core Intelligence, the Self-Serve API, Cloud Workbench) routes through via `propose_action`, never bypassed — decides nothing about risk itself, calls the Guardrail Engine for that. "Governed Automation" remains this document's phase name for the Orchestrator and Guardrail Engine together.
+**Orchestrator**: The durable-workflow component (Temporal) designed here. It handles sequencing, the MEDIUM-tier opt-out timer, the HIGH-tier approval wait, retries, execution, and rollback for every proposed action. Every proposal source reaches it through `propose_action`. It decides nothing about risk; it asks the Guardrail Engine. "Governed Automation" is the phase name for the two together.
 
-**Open Policy Agent (OPA)** — A policy-as-code engine used here to evaluate risk-classification rules (blast radius, production gate) as versioned, testable policy rather than inline conditional logic.
+**Open Policy Agent (OPA)**: A policy-as-code engine, used here to evaluate risk classification and guardrail rules as versioned, testable policy instead of inline code.
 
-**Risk-tiered autonomy** — Scaling an action's allowed independence to its assessed risk/impact, enforced in code rather than by the proposing system's own judgment.
+**Risk-tiered autonomy**: Matching how independently an action can run to its assessed risk, enforced in code instead of by the proposing system.
 
-**Temporal (workflow orchestration)** — An open-source durable execution engine; each proposed action runs as one Temporal workflow here, with Activities (classification, execution, alerting, rollback), Timers (the MEDIUM-tier opt-out window), and Signals (opt-outs, approvals) as its building blocks. See §3.3.
+**Temporal (workflow orchestration)**: A durable execution engine. Each proposed action runs as one Temporal workflow here, built from Activities (checks, classification, execution, alerting, rollback), Timers (the MEDIUM-tier opt-out window), and Signals (opt-outs, approvals). See §3.3.
