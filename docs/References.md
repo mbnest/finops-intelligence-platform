@@ -71,7 +71,13 @@ Only claims a decision depends on are listed, and each was checked against the l
 | R24 | `terraform test` (Terraform 1.6 or later) runs `.tftest.hcl` files, in plan-only mode for unit tests or against short-lived resources | [Terraform: Tests](https://developer.hashicorp.com/terraform/language/tests) | Solution Overview Test Strategy |
 | R25 | pydantic-ai's `TestModel` and `FunctionModel`, swapped in with `Agent.override()`, test agent code without calling a real LLM | [Pydantic AI: Testing](https://pydantic.dev/docs/ai/guides/testing/) | Solution Overview Test Strategy |
 
-## 6. Platform equivalents (portability table)
+## 6. LLM provider behavior
+
+| ID | Claim | Source | Used in |
+|---|---|---|---|
+| R29 | Azure OpenAI caches an identical prompt prefix of at least 1,024 tokens automatically, bills those cache reads at a discount on input token pricing, and reports them as `cached_tokens` in the response usage | [Microsoft: Prompt caching with Azure OpenAI](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/prompt-caching) | Cloud Workbench ADR-010; Build Specification §7 |
+
+## 7. Platform equivalents (portability table)
 
 | ID | Claim | Source | Used in |
 |---|---|---|---|

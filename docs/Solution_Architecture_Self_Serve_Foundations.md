@@ -30,6 +30,7 @@ Other internal teams and tools need Core Intelligence's findings (anomalies, rec
 | API latency | p95 under ~500ms for a simple lookup | A request/response API with a latency budget |
 | Data segregation | Hard isolation between verticals' data at query time | Same multi-tenant requirement as every other consumer-facing surface |
 | Auditability | Full reconstructable request lifecycle, retained per policy | HITRUST/SOC2-equivalent governance posture |
+| Fair use | Request rate limits per persona and per API key (`policy_request_rate`, Build Specification §7) | One client shouldn't be able to exhaust a shared service, or a vertical's generation budget, in a minute (Cloud Workbench ADR-010) |
 
 ### 2.4 Non-goals (inferred)
 

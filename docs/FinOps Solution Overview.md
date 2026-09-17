@@ -50,7 +50,8 @@ Requirements that apply to every phase. Phase-specific requirements (query laten
 | Data freshness ceiling | Provider billing lag (~24h) | Inherited from Data Foundations; no phase can offer fresher data than its source |
 | Auditability | Every output can be reconstructed: what was asked or computed, from what data, by which model or policy version | HITRUST/SOC2-equivalent governance posture across phases |
 | Data segregation | Vertical and account isolation enforced at the catalog and query layer and inherited by every consumer | Multi-tenant platform with compliance-sensitive data |
-| Platform's own cost | Tracked as rigorously as the cloud spend it analyzes | A FinOps platform that doesn't measure its own cost loses credibility |
+| Platform's own cost | Tracked as rigorously as the cloud spend it analyzes, and attributed to the vertical that caused it | A FinOps platform that doesn't measure its own cost loses credibility |
+| Bounded generation spend | Token budgets and request rate limits per persona and vertical, enforced before a model call (`policy_token_caps`) | Generation is the one unbounded per-request cost in the platform. Caps make it predictable per tenant (Cloud Workbench ADR-010) |
 | Alerting channels | Every alert (infrastructure, data quality, model quality, execution failure) posts to a Teams channel and opens a ticket or pages on-call in ITSM (believed to be ServiceNow, not confirmed). One shared pair of channels for all phases | Data Foundations §4.5's shared observability baseline; consistent incident response whichever phase raised the alert |
 
 ### Cross-Cutting Non-Goals (inferred)
@@ -276,6 +277,7 @@ That shapes the technology choices more than any single feature:
 | Self-hosted Temporal cluster | Temporal Cloud | The Temporal server and its persistence database are a heavy operating load (Governed Automation ADR-002) |
 | Standalone OPA service | OPA sidecar | The workflow workers are its only caller (Governed Automation ADR-005) |
 | Redis cache and session store | Postgres for session memory; no cache until measured latency needs one | One fewer store, and no cache invalidation problem up front (Cloud Workbench ADR-003, ADR-009) |
+| Semantic (embedding-based) response cache | Provider prompt caching, plus token budgets per tenant | A cache keyed on similarity can serve one vertical's number to another, or yesterday's number as today's, over data that reloads daily. Prompt caching needs no component and is exact (Cloud Workbench ADR-010) |
 | Separate API, MCP server, and agent services | One `cost-intelligence-api` service | Shared query functions, access checks, and audit logging; fewer deployables (Build Specification §7) |
 | Platform-owned AKS cluster, including model serving | CMP for three services; models score in Snowflake | the organization already runs a container platform, and scoring is batch (MLOps Pipeline ADR-008). The platform still owns its workload configuration: autoscaling, resource governance, pod security, identity, and network policy (Build Specification §8) |
 | Event streaming for billing data (Kafka, Event Hubs, Snowpipe Streaming) | Batches triggered by file arrival; events only where the source emits them | Providers publish billing data in restated daily batches, so a stream adds a broker without making data fresher (Data Foundations ADR-006) |

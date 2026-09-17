@@ -406,6 +406,19 @@ With one service, the REST API and the agent's MCP tools use the same query func
 | Table | Type | Key columns | Notes |
 |---|---|---|---|
 | `anomaly_dispositions` (Postgres) | Operational | `anomaly_id` (PK/FK), `disposition` (`true_anomaly`/`expected_change`/`false_positive`), `dispositioned_by`, `dispositioned_at`, `note` | Written by the disposition endpoint; synced to `gold.fact_anomaly` (Section 3) as labels for the anomaly detector (MLOps Pipeline §2.4) |
+| `token_budgets` (Postgres) | Operational | `budget_id` (PK), `scope_type` (`persona`/`vertical`), `scope_id`, `daily_token_limit`, `monthly_token_limit`, `daily_request_limit`, `set_by`, `effective_from` | The caps `policy_token_caps` enforces (Cloud Workbench ADR-010). Seeded per vertical and per persona; changing one is a deliberate act with an owner |
+| `llm_usage` (Postgres) | Operational | `usage_id` (PK), `request_id`, `persona`, `vertical_id`, `apm_id` (nullable), `node_name` (`node_query_rewrite`/`node_generate`/`node_draft_po`), `provider`, `model`, `prompt_tokens`, `cached_tokens`, `completion_tokens`, `estimated_cost_usd`, `created_at` | One row per model call. Feeds budget checks, the platform's own cost reporting, and cost per task in the provider bake-off (Cloud Workbench ADR-004). `cached_tokens` shows whether prompt caching is working |
+
+**Generation governance middleware** (Cloud Workbench ADR-010). The same layer that resolves persona also bounds spend, before any request reaches a model:
+
+| Control | Name | Behavior |
+|---|---|---|
+| Token caps | `policy_token_caps` | Sums `llm_usage.prompt_tokens + completion_tokens` for the caller's persona and vertical over the rolling day and calendar month, against `token_budgets`. Over budget returns `429` with the budget, the usage, and the reset time. Caps are per tenant, so one vertical can't spend another's allowance |
+| Rate limits | `policy_request_rate` | Per persona and per API key, applied to both `/v1/...` REST endpoints and `/v1/workbench/query`, so a client can't exhaust a daily budget in a minute |
+| Budget alerting | (no new channel) | At 80% of a daily or monthly budget, a warning to the platform's Teams channel and the vertical's owner (Data Foundations §4.5). The alert is a courtesy; the cap is the control |
+| Cost attribution | (reporting) | `llm_usage.estimated_cost_usd` rolled up per vertical and period, so the platform's own AI spend is charged back the way cloud spend is (Cloud Workbench §2.3) |
+
+**Prompt construction for caching**: every model-calling node builds its prompt stable-prefix-first (persona rules, metric catalog extract, schema, then the question), because providers cache only an identical leading prefix and discount those tokens ([References.md](References.md) R29). `cached_tokens` is recorded per call, and a drop in the cache hit rate after a prompt change is visible in the same table.
 
 The OpenAPI spec lives at `openapi.yaml` and is published automatically to an internal developer portal so other teams can discover the API (Self-Serve Foundations FR1).
 

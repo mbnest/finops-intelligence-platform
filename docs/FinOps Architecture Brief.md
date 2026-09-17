@@ -69,6 +69,7 @@ flowchart LR
 | Score in Snowflake, not on Kubernetes | All scoring is batch; keeping it next to the data keeps access policies in force and leaves nothing to operate | MLOps ADR-008 |
 | Stage the knowledge graph | Today's cost-only ontology is shallow enough for SQL views. A managed graph database arrives when a named trigger is met: the organization's enterprise graph, cross-domain data, or dependency-aware blast radius | Data Foundations ADR-004 |
 | Separate orchestration from policy | Temporal handles durable workflow; OPA decides risk and enforces guardrails; neither can override the other | Governed Automation ADR-001, ADR-002 |
+| Cap generation spend per tenant, and cache prompts rather than meanings | Generation is the platform's only unbounded per-request cost. Budgets per persona and vertical refuse politely and predictably; a semantic cache would risk serving one vertical's number to another | Cloud Workbench ADR-010 |
 | Enforce personas in the agent's graph, not its prompt | Verticals can't call action tools in chat because the tools aren't bound, not because the model was told not to | Cloud Workbench ADR-007 |
 | Provider-agnostic LLM interface with an eval bake-off | Azure OpenAI to start; the final model per task is chosen with the same eval set that gates every change | Cloud Workbench ADR-004 |
 | Snowflake with a documented exit | the organization's standard; Iceberg tables and a portability table keep a future platform change to re-implementing services, not migrating data | Data Foundations ADR-003 |
