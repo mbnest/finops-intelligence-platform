@@ -45,7 +45,7 @@ QUERIES = [
      """),
     ("4. Why did this vertical's bill change?",
      "The month-over-month change is split into causes that sum exactly to it: a new GPU resource in "
-     "finance in June, a removed resource in project management, usage change, and price change "
+     "finance in June, a removed resource in delivery, usage change, and price change "
      "(the May restatement).",
      """
      select billing_period, vertical_id,

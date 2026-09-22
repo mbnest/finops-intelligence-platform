@@ -136,7 +136,7 @@ Provider line item IDs aren't stable across deliveries, so rows are never upsert
 | 2026-06 | finance | 4960.0 | 5142.0 | 0.0 | -338.1 | 48.3 | 107.8 |
 | 2026-06 | delivery | -73.6 | 0.0 | -250.6 | 134.8 | 42.2 | 0.0 |
 
-June's jump in finance is a new GPU resource, not a price rise. Project management's drop is a removed resource, partly offset by usage growth elsewhere. `other_change` is charges with no resource, here the unused commitment above.
+June's jump in finance is a new GPU resource, not a price rise. Delivery's drop is a removed resource, partly offset by usage growth elsewhere. `other_change` is charges with no resource, here the unused commitment above.
 
 **5. The anomaly detector is scored, not trusted.** A FinOps practice that has never scored its own alerts has no labels, so the eval gate does what the design calls for: inject anomalies of known kind and size, and measure against them. The detector never reads the answer key.
 
