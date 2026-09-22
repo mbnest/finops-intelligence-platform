@@ -188,6 +188,7 @@ Every opportunity in `FinOps Opportunities.md`, mapped to the component that add
 | Daily cost visibility | Data freshness NFR; batch over event-driven | Data Foundations §2.3, ADR-006 | Detailed (bounded by provider billing lag) |
 | Unit economics | Not yet designed | None | **Planned**: add unit-cost metric definitions to the semantic layer |
 | ML-assisted analysis (anomaly, rightsizing, RI/SP) | Core Intelligence pipeline | MLOps Pipeline | Detailed |
+| Recommendation delivery and lifecycle tracking | Partly covered, not assembled: `gold.fact_recommendation`, the API's accept/reject endpoint, Phase 5 push channels, and the disposition SLA | Self-Serve Foundations §4.1; Cloud Workbench Expansion §3.2; Governed Automation Contract §3.6 | **Planned**: the pieces exist in four documents but there is no recommendation lifecycle, no recorded delivery event, and no disposition capture. See [Known gap: recommendation delivery and tracking](#known-gap-recommendation-delivery-and-tracking) |
 | Commitment coverage/utilization tracking | `metric_ri_coverage`, `metric_ri_sp_utilization`, commitment expiry view | Data Foundations §4.4; Build Specification §4; migration step 4 | Detailed |
 | APM resolution rate as governance KPI | `dq_check_apm_id_present` | Build Specification §4 | Detailed |
 | Platform's own cost tracked | Cost-of-platform NFR, per-workload warehouse resource monitors | Cloud Workbench §2.3; Build Specification §8; Cross-Cutting NFRs above | Detailed |
@@ -201,7 +202,7 @@ Every opportunity in `FinOps Opportunities.md`, mapped to the component that add
 | Published REST APIs | API/service layer | Self-Serve Foundations §4.1 | Detailed. Phase 2, non-agentic |
 | Persona-scoped access (Platform vs. Vertical tool sets and data) | Cloud Workbench persona resolution | Cloud Workbench §4.1, ADR-007 | Detailed |
 | Anonymized cross-vertical benchmarking, exposed to verticals | Cloud Workbench Expansion FR5 | Cloud Workbench Expansion §3.4 | Detailed. Extends the existing tool to Vertical users in the pull workbench |
-| Push: FinOps signals embedded in IDP/CMP/Internal Assistant | Cloud Workbench Expansion FR1 | Cloud Workbench Expansion §3.2 | Detailed. Staged by value: cloud optimization to IDP, Kubernetes to CMP, both to Internal Assistant once its API is confirmed |
+| Push: FinOps signals embedded in IDP/CMP/Internal Assistant | Cloud Workbench Expansion FR1 | Cloud Workbench Expansion §3.2 | Detailed. Staged by value: cloud optimization to IDP, Kubernetes to CMP, both to Internal Assistant once its API is confirmed. **But it is the platform's first proactive delivery path and it lands at step 31**, while rightsizing goes live at step 21. An earlier, simpler channel is needed to close that gap (see [Known gap](#known-gap-recommendation-delivery-and-tracking)) |
 | Pull: vertical self-serve workbench + what-if analysis | Cloud Workbench Expansion FR2–FR4 | Cloud Workbench Expansion §3.3 | Detailed. Reuses Core Intelligence's logic for projections; a vertical can submit a scenario as a proposed action from this surface only (ADR-4 there) |
 
 ### Part 2c: Automated Optimization Actions
@@ -220,6 +221,28 @@ Every opportunity in `FinOps Opportunities.md`, mapped to the component that add
 |---|---|---|---|
 | Confidence + evidence-scored reconciliation, confidence + impact-based routing | Bill Verification: rules first, then a model on the MLOps pattern (ADR-M4) | Bill Verification (entire); Build Specification §10 | Detailed |
 | PO auto-drafting from verified line items | GenAI drafting with deterministic verification, always human-approved | PO Auto-Draft (entire) | Detailed. ERP/procurement posting system unconfirmed (PO Auto-Draft ADR-4) |
+
+### Known gap: recommendation delivery and tracking
+
+The path a recommendation takes when it *is* automated is designed end to end: `propose_action`, the contract check, risk classification, guardrails, execution, audit. The path it takes when it **isn't** automated is not, even though that is the majority case by design. Advisory is the default state of every resource ([ADR-M2](#master-level-architecture-decisions)), contracts are opt-in and per application, and the LOW-tier pilot starts with one. Every recommendation outside a signed contract follows the undesigned path.
+
+What exists today, spread across four documents: `gold.fact_recommendation` (Build Specification §3), `POST /v1/recommendations/{id}/action` (§7 there), the push channels into IDP, CMP, and Internal Assistant (Cloud Workbench Expansion §3.2), and the disposition SLA with `finding_escalations` for significant findings that go unactioned (Governed Automation Contract §3.6). The pieces are real. They were never assembled into one path.
+
+Five things need design before Phase 2 ships:
+
+1. **A recommendation lifecycle.** `fact_recommendation.status` is never enumerated, unlike `fact_anomaly.disposition` and `fact_action_audit.outcome`. There is no state model covering open, delivered, accepted, rejected with a reason code, superseded, expired, and implemented.
+2. **Delivery as a recorded event.** Nothing records that a recommendation reached anyone, through which channel, or when. `finding_escalations.surfaced_at` starts the escalation SLA clock and has nothing to start it from.
+3. **Disposition capture.** The accept path routes to `propose_action`; the reject path stores nothing. Anomalies have `anomaly_dispositions`, a dedicated endpoint, and a sync to gold (Build Specification §7). Recommendations have no equivalent, and they should have the same one.
+4. **Verified closure, not self-reported.** `metric_recommendation_realization_rate` counts recommendations "marked implemented," but nothing marks one. Implementation should be observed from the billing and resource data the platform already holds, the way the rightsizing regret rate is measured after the fact (MLOps Pipeline §2.3), rather than trusted from a status click.
+5. **A proactive channel earlier than step 31.** Rightsizing goes live at step 21 and the first designed push is step 31, so for two waves the FinOps team still hand-delivers recommendations. That is the stakeholder-follow-up toil the rollout order claims to relieve first (Migration & Cutover Sequence). The minimum version needs no new technology: a scheduled per-vertical digest to the vertical's Teams channel, the same mechanism step 7 already offers for the monthly variance summary. The IDP and CMP push channels then upgrade that channel instead of being the first one.
+
+Two consequences are already visible as dangling references, and both close with item 3: MLOps Pipeline §2.2 declares `historical_recommendation_outcome` as a feature for all three model families, sourced from "`fact_recommendation` history" that is never captured; and `metric_recommendation_realization_rate` (Data Foundations §4.4) has no input.
+
+**Why it ended up this way, and why it matters.** The automated path was the novel, higher-risk, harder-to-get-right half, so it got the attention. The advisory path resembles what the practice does today, so it was treated as understood rather than designed. But "resembles today" is the problem: relieving the team's follow-up load depends on recommendations reaching owners and being tracked without a person chasing them, and none of that is automatic until step 31.
+
+**Expect others of this kind.** This gap was found by tracing a declared dependency to its source and finding none. That trace — every feature, metric, table, and tool these documents name, checked against something that actually produces it — is worth running across the whole set, and it finds this class of gap cheaply. A design built from the outside will have more of them, and the Methodology note in [FinOps Current State.md](FinOps%20Current%20State.md) applies to completeness as much as to accuracy: unverified facts are one risk, unnoticed gaps are a second and separate one.
+
+What matters for planning is the distinction between the two kinds. The gaps found so far are **additive**: this one needs a lifecycle, a table, an endpoint, a job, and a notification channel, and it changes no ADR, no phase dependency, and nothing in the data model. Unit economics is metric definitions on a semantic layer that already exists. Neither invalidates a decision already made, which is why neither is a reason to revisit the architecture. A gap that *did* change an ADR, a phase dependency, or the gold-layer model would be a different conversation, and should be treated as one. That test — does closing it change a decision, or only add a piece — is the one to apply to whatever surfaces next.
 
 ---
 

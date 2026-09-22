@@ -104,7 +104,16 @@ The rollout is ordered by which operational pain it removes, not by architecture
 | 8 | LLM bake-off, full agent, vertical rollout, push/pull, PO drafting | Follow-ups at scale, PO re-keying |
 | 9 | Legacy decommission | Retires the old stack |
 
-## 6. What still needs the organization
+## 6. What's still open
+
+### Needs more design work
+
+Known gaps in this design, as distinct from things waiting on the organization's input. A design built without insider access will have more of these, and they surface as assumptions get validated and as the documents get traced against each other. Both below are **additive**: they need a table, an endpoint, a scheduled job, or a metric definition, and neither changes an architecture decision, a phase dependency, or the data model. That is the test worth applying to the next one — whether closing it changes a decision, or only adds a piece.
+
+- **Recommendation delivery and tracking.** The path a recommendation takes when it is automated is designed end to end. The path it takes when it isn't is not, although advisory is the default state of every resource and contracts are opt-in, so that is the majority case. Recommendations have no lifecycle, no recorded delivery event, and no disposition capture, which leaves two declared dependencies with no source: the `historical_recommendation_outcome` ML feature and `metric_recommendation_realization_rate`. Proactive delivery to owning teams also arrives at migration step 31, two waves after rightsizing goes live, which is late for the follow-up load the rollout order is meant to relieve first. The Solution Overview's Capability Map has the five items this needs.
+- **Unit economics.** Cost per transaction, service, or customer, on top of the existing rollups. Named as an opportunity, not yet designed.
+
+### Needs the organization
 
 These can't be credibly answered from outside, and the Solution Overview lists how each would be produced:
 
