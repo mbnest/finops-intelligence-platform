@@ -235,6 +235,7 @@ demo/
 ## Open questions
 
 - None blocking. Revisit whether to add the stretch agent after step 5.
+- **Gap found 2026-09-22**: `mcp_server.server.propose_action` starts a workflow and awaits its result, but nothing in the demo runs a standalone Temporal worker — the only worker is the one `run_demo.py` starts inline. Called from a real MCP client (Claude Desktop, Claude Code, MCP Inspector), the tool hangs forever with nothing polling the task queue. Confirmed by running the tool's own code path (`mcp_server.server._propose`) against a separately started worker process: it also failed, because DuckDB allows only one writer per process and `storage.connection()` is opened by both the worker and the proposal call. Worked around by starting a worker and calling `_propose` in the same process, which produced the expected result (`aws-ec2-support-dev`, LOW tier, executed). Not in the README's stand-ins table since it's a real gap, not a stated substitution. Fix would be a `governed_automation/worker.py` entry point, run once alongside the MCP server.
 
 ## Progress log
 
